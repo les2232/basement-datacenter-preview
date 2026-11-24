@@ -237,3 +237,7 @@ dialog #achievement-toast:not(.is-visible) { display:none; }
 #sheet-scroll .card .card-shortfall { grid-column:1; grid-row:2; }
 #sheet-scroll .card .card-shortfall[hidden] { display:none!important; }
 #sheet-scroll .card .card-best { grid-column:1; grid-row:auto; }
+
+@media (min-width:800px) and (min-aspect-ratio:1/1) {
+  #sheet-scroll { flex:1 1 0; min-height:0; contain:strict; }
+}

@@ -3036,6 +3036,8 @@
     let left = 0, top = 0, right = 0, bottom = 0;
     let frameId = 0, lastFrame = 0, slowScore = 0, nextPaint = 0;
     let from = 0, target = null, changeAt = 0, rolling = false, lastPulse = -Infinity;
+    let tickBalanceUntil = 0;
+    const balanceRecoveryMs = 1800;
     let lastDollar = NaN, lastIncome = NaN;
     let lastTap = -Infinity, streak = 0, lastHeatTone = -Infinity, wasHot = false;
     let moneyVisible = true, lastTapLabel = null, lastSparkles = -Infinity;
@@ -3234,6 +3236,7 @@
       const elapsed = lastFrame ? now - lastFrame : 0;
       if (lastFrame) slowScore = Math.max(0, Math.min(12, slowScore + (elapsed > slowFrameMs ? 2 : -0.25)));
       lastFrame = now;
+      if (elapsed > slowFrameMs && slowScore >= busyScore) tickBalanceUntil = now + balanceRecoveryMs;
       if (particles.length > particleRoom()) {
         particles.splice(0, particles.length - particleRoom()); patchDirty = true;
       }
@@ -3245,8 +3248,8 @@
         drawParticles(now);
       }
       if (rolling) {
-        paintMoney(moneyAt(now));
-        rolling = now - changeAt < rollMs;
+        rolling = now >= tickBalanceUntil && now - changeAt < rollMs;
+        paintMoney(rolling ? moneyAt(now) : target);
       }
       if (particles.length || rolling) requestFrame();
       else lastFrame = 0;
@@ -3260,13 +3263,17 @@
       } else if (target !== value) {
         const previous = target;
         from = rolling ? moneyAt(now) : target;
-        target = value; changeAt = now; rolling = true;
+        target = value; changeAt = now;
+        // When frames fall behind, show the exact balance with each game update.
+        // Resume interpolation once the device has had time to catch up.
+        rolling = now >= tickBalanceUntil;
+        if (!rolling) paintMoney(value);
         if (value > previous && value - previous >= previous * 0.1 && now - lastPulse >= pulseGapMs) {
           lastPulse = now;
           animate(money, [{ transform: 'scale(1)' }, { transform: 'scale(1.055)', offset: 0.35 },
             { transform: 'scale(1)' }], { duration: 215, easing: 'ease-out' });
         }
-        requestFrame();
+        if (rolling || particles.length) requestFrame();
       }
       if (lastIncome !== income) {
         lastIncome = income;

@@ -381,11 +381,13 @@
     svg.append(clutter,things,badges);
     const circuit=document.createElement('div');
     circuit.className='doll-lights';circuit.setAttribute('aria-hidden','true');
-    frame.append(scenery,svg,circuit);
+    const haze=document.createElement('span');
+    haze.className='doll-local-haze';haze.setAttribute('aria-hidden','true');
+    frame.append(scenery,svg,circuit,haze);
     container.replaceChildren(frame);
     enableRoomDrag(container,frame);
-    // Only these tiny layers animate continuously. The dense room and machine paths
-    // stay on separate static surfaces instead of being repainted on each LED blink.
+    // The dense room and machine paths stay on static surfaces. Only the small
+    // indicator, fan and haze accents need to change while the room is running.
     function light(kind,u,v,z,size){
       const node=document.createElement('span');
       const [x,y]=floorPoint(u,v,z);
@@ -413,6 +415,51 @@
       things.append(node);
       groups.set(id,{node,count:0,sprites:[],badge:null});
     }
+    // Sample small accents on the existing game clock. Running four independent
+    // CSS timelines kept the entire room's style tree active between game ticks.
+    const room = container.parentElement;
+    const motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+    const mistLevels = [.25, .5, .8, .55];
+    let nextAccentAt = 0, fanPhase = -1, lightsOn = true, mistLevel = -1, signOn = true;
+
+    function updateAccents() {
+      const now = performance.now();
+      if (now < nextAccentAt) return;
+      nextAccentAt = now + 100;
+      const still = motionPreference.matches || document.body.classList.contains('effects-reduced') ||
+        document.body.classList.contains('effects-paused') || room.classList.contains('outside-view');
+      const fanPeriod = parseFloat(room.style.getPropertyValue('--fan-period')) || 1800;
+      const fan = groups.get('fan').light;
+      if (fan) {
+        const step = still ? 0 : Math.floor(now / (fanPeriod / 12)) % 12;
+        if (fanPhase !== step) {
+          fan.firstElementChild.style.transform = 'rotate(' + step * 30 + 'deg)';
+          fanPhase = step;
+        }
+      } else fanPhase = -1;
+
+      const blinkPeriod = fanPeriod + 1000;
+      const lit = still || now % blinkPeriod < blinkPeriod * .8;
+      if (lit !== lightsOn) {
+        circuit.style.opacity = lit ? '1' : '.48';
+        lightsOn = lit;
+      }
+      if (signLight) {
+        const neonLit = still || now % 9000 < 8400;
+        if (neonLit !== signOn) {
+          signLight.style.opacity = neonLit ? '1' : '.44';
+          signOn = neonLit;
+        }
+      }
+      if (!still && room.dataset.heat === 'hot') {
+        const level = mistLevels[Math.floor(now / 420) % mistLevels.length];
+        if (level !== mistLevel) {
+          haze.style.opacity = String(level);
+          mistLevel = level;
+        }
+      }
+    }
+
     function render(state,stage,drops) {
       let changed=lastLocation!==state.location;
       if(changed){
@@ -423,6 +470,7 @@
         scenery.src=backgrounds.get(state.location);
         if(state.location==='mall'){
           signLight=light('neon',56,1,93,46);
+          signOn=true;
         }else if(signLight){signLight.remove();signLight=null;}
         lastLocation=state.location;
       }
@@ -480,6 +528,7 @@
         }else if(g.badge){g.badge.remove();g.badge=null;}
         g.count=n;
       }
+      updateAccents();
       if(changed){
         const labels={laptop:'Old Laptop',tower:'Desktop Tower',rack:'Rack Server',gpu:'GPU Rig',cluster:'AI Training Cluster',mainframe:'Quantum Mainframe',ac:'Window AC',fan:'Box Fan',liquid:'Liquid Loop',sibling:'Little Sibling',sysadmin:'Sysadmin',manager:'Purchasing Manager'};
         const names={basement:'The Basement',warehouse:'The Warehouse',office:'The Office',mall:'The Mall'};
