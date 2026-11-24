@@ -1,0 +1,12 @@
+@font-face {
+  font-family: Nunito;
+  src: url("./fonts/Nunito-Latin.woff2") format("woff2");
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+}
+.ui-sprite { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+.ui-glyph { width: 1.3em; height: 1.3em; display: inline-block; vertical-align: middle; }
+
+.best-buy-star { margin-inline-end: .3em; }
+.best-buy-star .ui-glyph { width: 1em; height: 1em; vertical-align: -.1em; }
