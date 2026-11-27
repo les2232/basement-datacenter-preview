@@ -10,7 +10,7 @@
   --warn: #f5b84a;
   --hot: #ff5d5d;
   --cool: #6cc7ff;
-  --mono: Nunito, sans-serif;
+  --mono: Archivo, sans-serif;
   --radius: 10px;
   --tap-target: 44px;
 }
@@ -21,7 +21,7 @@ html, body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 15px/1.45 Nunito, sans-serif;
+  font: 15px/1.45 Archivo, sans-serif;
 }
 
 html { overscroll-behavior-y: contain; }
@@ -1027,7 +1027,7 @@ body.effects-paused::after, body.effects-paused::before { animation-play-state: 
   color: #fff7bf; background: linear-gradient(140deg, #866738, #453919 70%);
   border: 2px solid #ffd77a; border-radius: 13px 6px;
   box-shadow: 0 0 0 3px #d2a44c42, 0 0 13px #f2b74499, inset 0 0 9px #ffd77a40;
-  font: 800 36px/1 Nunito, sans-serif; user-select: none;
+  font: 800 36px/1 Archivo, sans-serif; user-select: none;
   animation: priority-bob 1.15s ease-in-out infinite alternate;
 }
 @keyframes priority-bob {
@@ -1157,7 +1157,7 @@ body.effects-paused::after, body.effects-paused::before { animation-play-state: 
 }
 #moment-banner.moment-visible { opacity: 1; }
 #moment-banner:has(.run-start-detail) { max-width: min(34rem, calc(100% - 32px)); }
-.run-start-detail { display: block; margin-top: 6px; color: #ffedca; font: 500 15px/1.45 Nunito, sans-serif; }
+.run-start-detail { display: block; margin-top: 6px; color: #ffedca; font: 500 15px/1.45 Archivo, sans-serif; }
 
 #run-summary { margin: 16px 0; }
 #run-summary div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); padding: 9px 0; }

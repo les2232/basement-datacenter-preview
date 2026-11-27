@@ -10,6 +10,11 @@
 #room[data-location="warehouse"] { --scene-ambient: #314959; --scene-bg: #1e222e; }
 #room[data-location="office"] { --scene-ambient: #513840; --scene-bg: #25202d; }
 #room[data-location="mall"] { --scene-ambient: #533747; --scene-bg: #27202c; }
+#room[data-location="dam"] { --scene-ambient: #385957; --scene-bg: #222d33; }
+#room[data-location="penthouse"] { --scene-ambient: #68514d; --scene-bg: #342c38; }
+#room[data-location="bunker"] { --scene-ambient: #465344; --scene-bg: #272d2e; }
+#room[data-location="orbital"] { --scene-ambient: #43536b; --scene-bg: #222736; }
+#room[data-location="volcano"] { --scene-ambient: #673d45; --scene-bg: #302431; }
 #room-inventory {
   position: absolute; inset: 0; display: grid; place-items: center; grid-template:minmax(0,1fr) / minmax(0,1fr); overflow: hidden; padding: 0;
   margin: 0; contain: layout paint; pointer-events: none; user-select: none; transform:translateZ(0);
@@ -28,7 +33,7 @@
 .doll-rotor { transform:matrix(.9,.39,0,1,0,0); }
 .doll-rotor svg { display:block; width:100%; height:100%; transform-origin:50% 50%; }
 .doll-count rect { fill: #33323c; stroke: #a59086; stroke-width: .8px; }
-.doll-count text { fill: #ffe4bb; font-size: 10px; font-weight: 850; font-family: Nunito,sans-serif; }
+.doll-count text { fill: #ffe4bb; font-size: 10px; font-weight: 850; font-family: Archivo,sans-serif; font-variant-numeric: tabular-nums; }
 @container (max-width: 470px) {
   .doll-count rect, .doll-count text { transform:scale(1.43); transform-origin:0 0; }
 }
@@ -62,3 +67,17 @@ body.effects-paused #room .doll-picture *, #room.outside-view .doll-picture * { 
   .doll-local-haze { display:none; }
   #room .doll-picture *, #room::after { animation:none !important; }
 }
+
+/* Fittings share one baked scene with the furniture. Only the seven edit
+   controls receive input; the equipment keeps its normal ordering and hit area. */
+.doll-decorating { scale: 1.035; }
+.doll-decor-targets { display: none; }
+.doll-decorating .doll-decor-targets { display: block; }
+.doll-decor-target { pointer-events: all; cursor: pointer; outline: none; }
+.doll-decor-ring { fill: #2c3a3e22; stroke: #f2dac0; stroke-width: 1.2; stroke-dasharray: 3 3; }
+.doll-decor-pin { fill: #3d5454; stroke: #edd6b5; stroke-width: 1.2; }
+.doll-slot-icon { fill: none; stroke: #f8e5c5; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.doll-decor-target[aria-pressed="true"] .doll-decor-ring, .doll-decor-target:focus-visible .doll-decor-ring {
+  fill: #edd5a542; stroke: #fff2c7; stroke-width: 2.2; stroke-dasharray: none;
+}
+.doll-decor-target:hover .doll-decor-pin, .doll-decor-target[aria-pressed="true"] .doll-decor-pin { fill: #846747; }

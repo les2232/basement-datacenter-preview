@@ -11,17 +11,17 @@
   const adConfig = window.ADS;
   const rewardedEnabled = adConfig?.enabled === true && /^(?:ca-)?pub-\d{16}$/.test(adConfig.publisherId);
   const { MACHINES, COOLERS, UPGRADES, STAFF, LOCATIONS, CONFIG } = E;
+  const NOTATION_KEY = window.GameChannel.key('basement-datacenter.notation');
+  try { E.setNotation(localStorage.getItem(NOTATION_KEY) || 'standard'); } catch { /* Standard notation. */ }
   const money = E.formatMoney;
   const rate = E.formatRate;
-  const wholeDollars = new Intl.NumberFormat('en-US', {
-    style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0,
-  });
-  const moveGoalText = wholeDollars.format(CONFIG.moveGoal);
+  // All money text goes through economy.js so the player's number style (Settings → Numbers)
+  // applies everywhere: exact dollars while readable, then K/M/B…/Dc or e-notation.
+  const exactMoney = (amount, mode) => E.formatExactMoney(amount, mode);
+  const shortMoney = amount => E.formatShortMoney(amount);
+  const moveGoalText = exactMoney(CONFIG.moveGoal);
   const dollarsAndCents = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-  const insuranceMoney = amount => (Number.isInteger(amount) ? wholeDollars : dollarsAndCents).format(amount);
-  const compactGoal = new Intl.NumberFormat('en-US', {
-    style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 2,
-  });
+  const insuranceMoney = amount => (amount < 1e6 && !Number.isInteger(amount) ? dollarsAndCents.format(amount) : exactMoney(amount));
   const percent = new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 2 });
   const starBonus = stars => '+' + percent.format(E.reputationMultiplier(state, stars) - 1);
   const runStarBonus = () => '+' + percent.format(E.runReputationMultiplier(state) - 1);
@@ -47,12 +47,12 @@
   const el = {
     income: $('income'), throttle: $('throttle'), reserve: $('cooling-reserve'),
     incomeSource: $('income-source'), sysadminReceipt: $('sysadmin-receipt'),
-    heatText: $('heat-text'), heatFill: $('heat-fill'),
+    heatText: $('heat-text'), heatFill: $('heat-fill'), fireproofBadge: $('fireproof-badge'), orbitalHeatRule: $('orbital-heat-rule'),
     fireRisk: $('fire-risk'), fireRiskFill: $('fire-risk-fill'), fireRiskValue: $('fire-risk-value'),
     fireAlarm: $('fire-alarm'), fireCountdown: $('fire-countdown'), fireEdge: $('fire-screen-edge'),
     fireFlash: $('fire-flash'), fireMoment: $('fire-moment'), firePayout: $('fire-payout'), fireRebuild: $('fire-rebuild'),
     powerControl: $('power-control'), powerSlider: $('power-slider'), powerValue: $('power-value'),
-    powerReadout: $('power-readout'), powerBest: $('power-best'), powerTarget: $('power-target'),
+    powerReadout: $('power-readout'), powerBest: $('power-best'), powerTarget: $('power-target'), powerCapLabel: $('power-cap-label'),
     incident: $('incident-banner'), incidentTitle: $('incident-title'), incidentTime: $('incident-time'),
     incidentDetail: $('incident-detail'), incidentActions: $('incident-actions'),
     accept: $('incident-accept'), decline: $('incident-decline'),
@@ -62,13 +62,13 @@
     moveBtn: $('move-btn'), location: $('location'),
     sellBtn: $('sell-btn'), reputation: $('reputation'),
     perkDialog: $('perk-dialog'), perkOptions: $('perk-options'), perkTier: $('perk-tier'),
-    jobBtn: $('job-btn'), jobValue: $('job-value'), tapEquivalent: $('tap-equivalent'), tapBoost: $('tap-boost'),
+    jobBtn: $('job-btn'), jobValue: $('job-value'), tapEquivalent: $('tap-equivalent'), tapBoost: $('tap-boost'), tapMultiplier: $('tap-multiplier'),
     room: $('room'), roomInventory: $('room-inventory'), roomTitle: $('room-title'), roomTerms: $('room-terms'), log: $('log'),
     upgradeEmpty: $('upgrade-empty'), installed: $('installed'),
     unlockTeaser: $('unlock-teaser'), unlockText: $('unlock-text'), unlockProgress: $('unlock-progress'),
     saveStatus: $('save-status'), resetBtn: $('reset-btn'),
     modal: $('modal'), modalTitle: $('modal-title'), modalBody: $('modal-body'), modalActions: $('modal-actions'),
-    settingsDialog: $('settings-dialog'),
+    settingsDialog: $('settings-dialog'), photoDialog: $('decor-photo'),
   };
 
   let state;
@@ -104,6 +104,8 @@
       text: "Your parents finally gave you the basement. You have one outlet and one idea: rent out computer time." },
     { id: 'firstLaptop', when: (s) => s.machines.laptop >= 1,
       text: "The laptop whirs to life. Somewhere, a stranger's spreadsheet is being calculated. You get paid every second." },
+    { id: 'firstClient', when: s => s.counters.machinesBought >= E.CONTRACT_RULES.unlockMachinesBought, cls: 'good',
+      text: 'Your phone buzzes. A bakery chain wants web hosting. Open Goals to pick your first client contract.' },
     { id: 'firstHot', when: (s, st) => st.throttle < 1, cls: 'warn',
       text: "It's getting hot down here! When heat goes over your cooling, every machine slows down. A Box Fan will help." },
     { id: 'firstFan', when: (s) => s.coolers.fan >= 1,
@@ -120,7 +122,7 @@
       text: 'You flip every switch to MAX. The basement smells like hot dust. Watch that heat bar.' },
     { id: 'halfway', when: (s) => s.location === 'basement' && s.lifetime >= CONFIG.moveGoal / 2,
       text: "A neighbor asks if you're \"mining crypto down there.\" You say \"sort of.\" Halfway to moving out." },
-    { id: 'canMove', when: (s) => E.canMove(s), cls: 'big',
+    { id: 'canMove', when: s => s.location === 'basement' && E.canMove(s), cls: 'big',
       text: `You've earned ${moveGoalText} and outgrown the basement. Press the move button to choose your new home.` },
     { id: 'movedWarehouse', when: (s) => s.location === 'warehouse', cls: 'big',
       text: 'Welcome to the Arctic Warehouse. Your breath fogs. Your machines have never been happier. GPU Rigs unlocked!' },
@@ -128,6 +130,13 @@
       text: 'Welcome to the Downtown Office. Clients pay more for the fancy address. GPU Rigs unlocked!' },
     { id: 'movedMall', when: s => s.location === 'mall', cls: 'big',
       text: 'You roll the first rack past a dry fountain. The old food court has more outlets than customers.' },
+    ...Object.entries({
+      dam: 'The turbine engineer draws a new red line on the Power dial. “Plenty of river left,” she says.',
+      penthouse: 'The concierge hands you two phones. Both are already ringing.',
+      bunker: 'The operations manual is in a biscuit tin. Two names are still on the duty roster. Every fire drill is crossed out.',
+      orbital: 'Ground control asks if the racks need a breather. Your sibling points out there is nothing up here to breathe.',
+      volcano: 'The geothermal hookup comes with an oversized Power dial and an oven mitt.',
+    }).map(([id, text]) => ({ id: 'opened:' + id, when: s => s.location === id, cls: 'big', text })),
     { id: 'firstGpu', when: (s) => s.machines.gpu >= 1,
       text: 'The GPU rig spins up. It sounds like a hair dryer having an argument.' },
     { id: 'firstStartupSale', when: s => s.runs >= 1, cls: 'big',
@@ -347,10 +356,10 @@
   let bestPurchase = null;
   const recentTaps = [];
   let shopTabsInView = false;
-  const cardByButton = new WeakMap();
+  const cardByRow = new WeakMap();
   const adviceObserver = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => {
     for (const entry of entries) {
-      const card = cardByButton.get(entry.target);
+      const card = cardByRow.get(entry.target);
       if (card) card.inView = entry.isIntersecting;
       else shopTabsInView = entry.isIntersecting;
     }
@@ -467,20 +476,21 @@
         const icon = UIIcons.paint(make('span', 'card-icon'), def.icon);
         const main = make('span', 'card-main');
         const title = make('span', 'card-title');
-        const name = make('span', null, def.name);
+        const name = make('span', 'card-name', def.name);
         const owned = make('span', 'card-owned');
         title.append(name, owned);
         const desc = make('span', 'card-desc');
         const blurb = make('span', 'card-blurb', def.blurb || '');
         blurb.hidden = !def.blurb;
         main.append(title, desc, blurb);
+        // One short line of buying advice stays visible in the collapsed row.
         const advice = make('span', 'card-advice');
         const best = make('span', 'card-best');
         best.append(UIIcons.paint(make('span', 'best-buy-star'), 'star'), make('span'));
         const payback = make('span', 'card-payback');
         const eta = make('span', 'card-eta');
         best.hidden = payback.hidden = eta.hidden = true;
-        advice.append(payback, eta);
+        advice.append(eta, payback);
         main.append(advice);
         const price = make('span', 'card-price');
         const costEl = make('span', 'card-cost');
@@ -501,27 +511,34 @@
         acknowledge.hidden = true;
         acknowledge.setAttribute('aria-label', `Mark ${def.name} as seen`);
         const detail = make('details', 'item-details');
-        const detailLabel = make('summary', null, 'Details');
-        detailLabel.setAttribute('aria-label', def.name + ' details');
+        const detailLabel = make('summary', null, kind === 'staff' ? 'Role details' : 'Specs and payoff');
+        detailLabel.setAttribute('aria-label', `${detailLabel.textContent} for ${def.name}`);
         const detailText = make('p', 'card-info');
         detail.append(detailLabel, detailText);
         detail.addEventListener('toggle', () => {
-          if (detail.open) setText(detailText, [def.blurb || def.desc, describe({kind, def}, E.stats(state))].filter(Boolean).join(' '));
+          if (detail.open) renderCardDetails(card, E.stats(state));
         });
         row.append(button, acknowledge, detail);
         container.appendChild(row);
 
         const card = { kind, def, el: button, row, owned, desc, cost: costEl, shortfall,
-          badge, acknowledge, funds, fill, best, payback, eta, newFlag: `shop-new:${kind}:${def.id}` };
-        cardByButton.set(button, card);
-        adviceObserver?.observe(button);
+          badge, acknowledge, funds, fill, best, payback, eta, detail, detailText,
+          newFlag: `shop-new:${kind}:${def.id}` };
+        // An open disclosure may still be visible after its purchase button
+        // scrolls away. Keep its live advice current until the whole row leaves.
+        cardByRow.set(row, card);
+        adviceObserver?.observe(row);
         if (kind === 'machine') {
+          // Shown in the row only when the selected quantity would reach a milestone.
+          card.milestoneHit = make('span', 'card-milestone-hit');
+          card.milestoneHit.hidden = true;
+          main.append(card.milestoneHit);
           const label = make('span', 'card-milestone-label');
           const track = make('span', 'card-milestone-track');
           const fill = make('span', 'card-milestone-fill');
           track.setAttribute('aria-hidden', 'true');
           track.appendChild(fill);
-          main.append(label, track);
+          detail.append(label, track);
           card.milestone = { label, track, fill, lastOwned: null };
         }
         button.addEventListener('click', () => onBuy(card));
@@ -537,6 +554,14 @@
     }
   }
 
+  function renderCardDetails(card, st) {
+    if (!card.detail.open) return;
+    const outputNote = card.kind === 'machine'
+      ? 'Heat can reduce this output. Buy any recommended cooling separately.' : '';
+    setText(card.detailText, [card.def.blurb || card.def.desc, describe(card, st),
+      outputNote, exactPriceText(card)].filter(Boolean).join(' '));
+  }
+
   // Between two consecutive Max totals the affordable count cannot change. Reuse
   // that quote while money ticks up, or until a purchase changes the owned count.
   function quoteFor(card, owned = E.ownedCount(state, card.kind, card.def.id)) {
@@ -550,10 +575,52 @@
     const total = E.bulkCost(state, kind, def.id, count);
     const nextTotal = mode === 'max' && count < CONFIG.maxBulkBuy
       ? total + E.price(def, owned + count, state) : Infinity;
-    const formatted = wholeDollars.format(total);
-    const label = mode === 'max' ? `Max (${count}) · ${formatted}` : formatted;
-    card.quote = { mode, owned, count, total, nextTotal, label };
+    const prefix = mode === 'max' ? `Max (${count}) · ` : '';
+    card.quote = { mode, owned, count, total, nextTotal, prefix };
     return card.quote;
+  }
+
+  // Money inside a shop card: the exact amount, plus a compact copy (e.g. $2.70M) that
+  // narrow layouts show instead. Neither copy can break inside the number, and the
+  // compact one rounds up so it never understates a price or a shortfall.
+  function setAmount(node, prefix, amount, suffix = '') {
+    const full = exactMoney(amount, 'ceil');
+    const compact = money(amount, 'ceil');
+    const key = `${prefix}|${full}|${suffix}`;
+    if (node.dataset.amountKey === key) return;
+    node.dataset.amountKey = key;
+    const parts = [];
+    // The prefix ("Max (12) · ", "Need ") may wrap; the amount and "Buy" never split.
+    if (prefix) parts.push(make('span', 'price-prefix', prefix));
+    if (compact === full) {
+      parts.push(make('span', 'price-amount', full));
+    } else {
+      parts.push(make('span', 'price-amount money-full', full), make('span', 'price-amount money-compact', compact));
+    }
+    if (suffix) parts.push(suffix);
+    node.replaceChildren(...parts);
+    node.title = `${prefix}${full}${suffix}`;
+  }
+
+  // Non-money requirements for a shop item, refreshed whenever the shop structure changes.
+  function purchaseBlocker(def) {
+    return E.requirementBlocker(state, def);
+  }
+
+  function setPlain(node, text) {
+    if (node.dataset.amountKey) {
+      delete node.dataset.amountKey;
+      node.removeAttribute('title');
+    }
+    setText(node, text);
+  }
+
+  function exactPriceText(card) {
+    if (card.kind === 'staff' && E.ownedCount(state, card.kind, card.def.id) >= card.def.prices.length) return '';
+    const quote = quoteFor(card);
+    const amount = exactMoney(quote.count ? quote.total : quote.nextTotal, 'ceil');
+    if (quote.mode === 'max') return quote.count ? `Exact price for ${quote.count}: ${amount}.` : `Exact price for 1: ${amount}.`;
+    return `Exact price${quote.count > 1 ? ` for ${quote.count}` : ''}: ${amount}.`;
   }
 
   function onBuy(card) {
@@ -579,7 +646,7 @@
 
   function purchaseLog(card, result) {
     delete state.flags[card.newFlag];
-    const spent = wholeDollars.format(result.cost);
+    const spent = exactMoney(result.cost);
     if (card.kind === 'upgrade') {
       log(`Installed ${card.def.name}: ${card.def.desc}`, 'good');
     } else if (card.kind === 'staff') {
@@ -596,9 +663,9 @@
   function describe(card, st) {
     const id = card.def.id;
     if (card.kind === 'machine') {
-      return `+${rate(st.incomePerUnit[id])} each · +${E.formatNumber(st.heatPerUnit[id])} heat`;
+      return `Up to ${rate(st.incomePerUnit[id])}\u00a0each · +${E.formatNumber(st.heatPerUnit[id])}\u00a0heat`;
     }
-    if (card.kind === 'cooler') return `+${E.formatNumber(st.coolingPerUnit[id])} cooling each`;
+    if (card.kind === 'cooler') return `+${E.formatNumber(st.coolingPerUnit[id])}\u00a0cooling each`;
     if (card.kind === 'staff') {
       if (id === 'sysadmin') return `Buys cooling above 100% load. Spends up to ${CONFIG.sysadminSpendShare * 100}% of cash per purchase.`;
       if (id === 'manager') return `Up to ${1000 / E.MANAGER.intervalMs} purchases/s. Skips purchases that would risk a fire.`;
@@ -663,13 +730,15 @@
     }
     for (const card of cards) {
       card.wasRevealed = E.isRevealed(state, card.kind, card.def.id);
-      card.eligible = E.meetsRequirements(state, card.def);
+      card.blocker = purchaseBlocker(card.def);
+      card.eligible = !card.blocker;
       card.quote = null;
       card.dotPrice = null;
       card.wasAffordable = card.wasRevealed && affordableForDot(card, E.ownedCount(state, card.kind, card.def.id));
       card.displayedAffordable = null;
+      card.displayedStatus = null;
       for (const line of [card.best, card.payback, card.eta]) setHidden(line, true);
-      card.el.classList.remove('can-shimmer', 'reveal-flash', 'is-best');
+      card.el.classList.remove('can-shimmer', 'reveal-flash', 'is-best', 'is-locked');
     }
     const staffShown = cards.some(card => card.kind === 'staff' && card.wasRevealed);
     setHidden(shopTabs.get('staff').button, !staffShown);
@@ -734,7 +803,8 @@
       if (kind === 'staff') anyStaffShown = true;
 
       card.ownedCount = E.ownedCount(state, kind, def.id);
-      card.eligible = E.meetsRequirements(state, def);
+      card.blocker = purchaseBlocker(def);
+      card.eligible = !card.blocker;
       revealedCards.push(card);
       if (kind === 'machine') renderMachineMilestone(card, active);
       if (!active) continue;
@@ -800,13 +870,14 @@
     shopLifetime = state.lifetime;
     if (shopStats !== st) {
       shopStats = st;
-      const priceKey = JSON.stringify([state.location, state.extraLocation, state.perks, state.stars, state.challenge, state.challengeRewards]);
+      const priceKey = JSON.stringify([state.sites, state.location, state.extraLocation, state.perks, state.stars, state.challenge, state.challengeRewards]);
       if (priceKey !== shopPriceKey) {
         shopPriceKey = priceKey;
         for (const card of cards) { card.quote = null; card.dotPrice = null; }
       }
       const key = JSON.stringify([state.machines, state.coolers, state.upgrades, state.staff, state.location,
-        state.active?.id, state.active?.side, priceKey, st.power, !!state.flags.fireSmokeSeen, state.managerEnabled]);
+        state.active?.id, state.active?.side, priceKey, st.power, !!state.flags.fireSmokeSeen, state.managerEnabled,
+        !!state.perkChoicePending]);
       refresh = refresh || key !== shopStructure;
       shopStructure = key;
     }
@@ -823,17 +894,20 @@
         card.wasAffordable = affordable;
         continue;
       }
+      renderCardDetails(card, st);
       if (card.kind === 'staff' && card.ownedCount === card.def.prices.length) {
         const toggle = card.def.id !== 'sibling';
         if (card.el.disabled !== !toggle) card.el.disabled = !toggle;
         card.el.classList.toggle('affordable', toggle);
         const control = card.def.id === 'manager' ? `Auto-buying ${state.managerEnabled ? 'on' : 'off'}` :
           `Auto-cooling ${state.staff.sysadminEnabled ? 'on' : 'off'}`;
-        setText(card.cost, toggle ? control : 'Max level');
+        setPlain(card.cost, toggle ? control : 'Max level');
         setHidden(card.shortfall, true);
         setHidden(card.funds, true);
         setHidden(card.acknowledge, true);
+        card.el.classList.remove('is-locked');
         card.displayedQuote = null;
+        card.displayedStatus = null;
         card.wasAffordable = false;
         card.displayedAffordable = null;
         card.el.classList.remove('is-best');
@@ -843,33 +917,67 @@
       const quote = quoteFor(card, card.ownedCount);
       if (card.displayedQuote !== quote) {
         card.displayedQuote = quote;
-        setText(card.cost, quote.label);
+        setAmount(card.cost, quote.prefix, quote.total);
       }
-      const affordable = quote.count > 0 && state.money >= quote.total && card.eligible;
+      // A requirement (e.g. a later expansion stage) and a cash shortage are different
+      // blockers: a locked card explains the requirement and never shows a funds bar.
+      const blocker = state.perkChoicePending ? { type: 'perk-choice' } : card.blocker;
+      const status = E.purchaseStatus(state, card.kind, card.def.id, quote, blocker);
+      const affordable = status.status === 'ready';
       if (affordable !== card.displayedAffordable) {
         card.el.disabled = !affordable;
         card.el.classList.toggle('affordable', affordable);
         if (!affordable) card.el.classList.remove('can-shimmer');
         else if (card.wasAffordable === false && !feel.reduced() && !managerBurst()) card.el.classList.add('can-shimmer');
-        setHidden(card.shortfall, affordable);
-        setHidden(card.funds, affordable);
         card.displayedAffordable = affordable;
       }
       card.wasAffordable = affordable;
       setHidden(card.acknowledge, affordable || card.badge.hidden);
-      if (affordable) continue;
-      const needed = quote.count ? quote.total : quote.nextTotal;
-      const shortfall = Math.ceil(needed - state.money);
-      if (card.lastShortfall !== shortfall) {
-        card.lastShortfall = shortfall;
-        setText(card.shortfall, `Need ${wholeDollars.format(shortfall)} more`);
+      const locked = status.status === 'locked';
+      const short = status.status === 'short';
+      if (card.displayedStatus !== status.status) {
+        card.displayedStatus = status.status;
+        card.el.classList.toggle('is-locked', locked);
+        setHidden(card.shortfall, !locked && !short);
+        setHidden(card.funds, !short);
+        if (!short) setHidden(card.eta, true);
+        if (locked) setHidden(card.payback, true);
+        card.lastShortfall = card.lockedText = card.fraction = null;
       }
-      const fraction = Math.min(1000, Math.round(state.money / needed * 1000));
+      if (card.milestoneHit) renderMilestoneHit(card, quote, locked);
+      if (locked) {
+        const text = E.requirementText(state, status.blocker, card.ownedCount);
+        if (card.lockedText !== text) {
+          card.lockedText = text;
+          setPlain(card.shortfall, text);
+        }
+        continue;
+      }
+      if (!short) continue;
+      if (card.lastShortfall !== status.shortfall) {
+        card.lastShortfall = status.shortfall;
+        setAmount(card.shortfall, 'Need ', status.shortfall, ' more');
+      }
+      const fraction = Math.min(1000, Math.round(status.fraction * 1000));
       if (card.fraction !== fraction) {
         card.fraction = fraction;
         card.fill.style.transform = `scaleX(${fraction / 1000})`;
       }
     }
+  }
+
+  // The highest ownership milestone the selected quantity would reach, if any.
+  function renderMilestoneHit(card, quote, locked) {
+    const owned = card.ownedCount;
+    let tier = null;
+    if (!locked && quote.count) {
+      for (const t of E.MILESTONES) if (t.count > owned && t.count <= owned + quote.count) tier = t;
+    }
+    const text = tier
+      ? `Reaches ${tier.count} owned → ${E.milestoneMult(tier.count, state).toLocaleString('en-US')}×\u00a0output`
+      : '';
+    setText(card.milestoneHit, text);
+    setHidden(card.milestoneHit, !text);
   }
 
   function bestBuyLabel(best) {
@@ -910,14 +1018,20 @@
       if (card.kind !== activeShopTab) continue;
       if (card.kind === 'staff' && card.ownedCount === card.def.prices.length) continue;
       showBestPurchase(card);
-      if (adviceObserver && !card.inView) continue;
+      // Advice lines are part of each collapsed row, so fill the whole visible category
+      // (well under a millisecond per pass). Rows then keep their height while scrolling.
       const selectedCount = quoteFor(card, card.ownedCount).count;
       const count = selectedCount || 1;
       const quote = E.purchaseQuote(state, card.kind, card.def.id, count, tapsPerSecond);
+      // Payback is advice about a purchase plan: for a machine it may include cooling
+      // that a tap on the card does not buy. Its qualifiers stay with the estimate.
       let payback = E.formatPayback(quote?.paybackSeconds);
       if (payback && selectedCount === 0) payback += ' for one';
       if (payback && card.kind === 'machine' && quote.steps.length > count) payback += ' with cooling';
-      const eta = E.formatAffordable(quote?.affordableSeconds);
+      // Only a cash shortage gets a wait estimate. A locked item explains its requirement.
+      let eta = card.displayedStatus === 'short' ? E.formatAffordable(quote?.affordableSeconds) : '';
+      if (eta === 'Affordable now') eta = '';
+      if (eta && selectedCount === 0) eta += ' for one';
       setText(card.payback, payback);
       setText(card.eta, eta);
       setHidden(card.payback, !payback);
@@ -959,7 +1073,7 @@
   const dollhouse = RoomScene.mount(el.roomInventory);
   let roomIncome, roomPower, fanPeriodMs;
   function renderRoom(st) {
-    const heat = st.throttle < 1 ? 'hot' : st.load >= .88 ? 'warm' : 'cool';
+    const heat = st.throttle < 1 ? 'hot' : st.load >= .88 * st.freeLoad ? 'warm' : 'cool';
     if (el.room.dataset.heat !== heat) {
       el.room.dataset.heat = heat;
       document.documentElement.classList.toggle('room-throttled', heat === 'hot');
@@ -987,15 +1101,15 @@
   // Main render
   // ---------------------------------------------------------------------------
 
-  let shownPower = null, shownBest = null;
+  let shownPower = null, shownPowerHeat = null, shownBest = null, shownPowerMax = null, shownPowerLabel = '';
   const bestPercent = new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 1 });
   el.powerSlider.min = E.POWER.min;
-  el.powerSlider.max = E.POWER.max;
   el.powerSlider.step = E.POWER.step;
 
   function showPowerValue(power, heatMultiplier) {
-    if (shownPower === power) return;
+    if (shownPower === power && shownPowerHeat === heatMultiplier) return;
     shownPower = power;
+    shownPowerHeat = heatMultiplier;
     const value = Math.round(power * 100) + '%';
     el.powerSlider.value = power;
     el.powerSlider.setAttribute('aria-valuetext', value);
@@ -1003,16 +1117,27 @@
     setText(el.powerReadout, `Income ×${power.toFixed(2)} · Heat ×${heatMultiplier.toFixed(2)}`);
   }
 
-  function renderPower(st) {
+  function renderPower(st, signature) {
     const unlocked = E.powerUnlocked(state, st);
     setHidden(el.powerControl, !unlocked);
     if (!unlocked) return;
+    const max = signature.powerMax;
+    if (shownPowerMax !== max || shownPowerLabel !== signature.powerLabel) {
+      shownPowerMax = max;
+      shownPowerLabel = signature.powerLabel;
+      shownBest = null;
+      el.powerSlider.max = max;
+      el.powerControl.style.setProperty('--standard-power-end', ((E.POWER.max - E.POWER.min) / (max - E.POWER.min) * 100) + '%');
+      el.powerControl.classList.toggle('has-site-power', !!shownPowerLabel);
+      setHidden(el.powerCapLabel, !shownPowerLabel);
+      if (shownPowerLabel) setText(el.powerCapLabel, shownPowerLabel + ' · ' + bestPercent.format(max) + ' max');
+    }
     showPowerValue(st.power, st.powerHeatMult);
     const best = E.powerSweetSpot(state, st);
     if (shownBest === best) return;
     shownBest = best;
     el.powerBest.dataset.value = String(best);
-    el.powerBest.style.left = ((best - E.POWER.min) / (E.POWER.max - E.POWER.min) * 100) + '%';
+    el.powerBest.style.left = ((best - E.POWER.min) / (max - E.POWER.min) * 100) + '%';
     setText(el.powerTarget, 'Best power at current cooling: ' + bestPercent.format(best) + '.');
   }
 
@@ -1032,7 +1157,7 @@
     if (old === power) return;
     const crossed = mark => (old < mark && power >= mark) || (old > mark && power <= mark);
     if (crossed(E.POWER.normal) || crossed(best)) feel.powerTick();
-    showPowerValue(power, power ** E.POWER.heatExponent);
+    showPowerValue(power, E.stats(state).powerHeatMult);
     powerChanged = true;
     scheduleScreenUpdate();
   });
@@ -1064,12 +1189,30 @@
     }, { rootMargin: '48px 0px' }).observe(incomeLine);
   }
 
+  // The browser tab shows the balance ("$1.23M · Mom, It's a Startup"), so progress is visible
+  // from other tabs. The game loop pauses while the tab is hidden and settles the time on return,
+  // so meanwhile the title estimates the balance from income, within the offline earnings limit.
+  const baseTitle = document.title;
+  let shownTitle = '';
+  function titleBalance() {
+    if (!document.hidden || !lastStats || !state) return state?.money ?? 0;
+    const away = Math.min(Math.max(0, (Date.now() - state.lastTick) / 1000), lastStats.offlineCapSeconds);
+    return state.money + away * lastStats.income;
+  }
+  function updateTitle(force = false) {
+    if (!state) return;
+    const text = `${money(titleBalance())} · ${baseTitle}`;
+    if (force || text !== shownTitle) document.title = shownTitle = text;
+  }
+  setInterval(updateTitle, 1000);
+
   function render(automatic = false) {
     if (uiFrame && !tickDue) { cancelAnimationFrame(uiFrame); uiFrame = 0; }
     if (pendingStaffOrders.length && (!automatic || !managerBurst() || performance.now() >= nextStaffPaint)) showStaffOrders();
     powerChanged = false;
     const st = E.stats(state);
     const previous = lastStats;
+    const signature = E.signatureUI(state, st);
     lastStats = st;
     el.heatFill.classList.toggle('automated-heat', !!managerBurst());
     feel.updateMoney(state.money, st.income);
@@ -1083,6 +1226,14 @@
       setHidden(el.tapEquivalent, st.income <= 0);
     }
     renderTapBoost(st.income);
+    if (el.tapMultiplier.hidden === signature.doubleTaps) {
+      setHidden(el.tapMultiplier, !signature.doubleTaps);
+      el.jobBtn.setAttribute('aria-describedby', signature.doubleTaps ? 'tap-equivalent tap-multiplier' : 'tap-equivalent');
+    }
+    if (el.fireproofBadge.hidden === signature.fireproof) {
+      setHidden(el.fireproofBadge, !signature.fireproof);
+      $('heat-chip').setAttribute('aria-label', signature.fireproof ? 'Heat and power, fireproof' : 'Heat and power');
+    }
     if (previous?.throttle !== st.throttle || previous?.rawIncome !== st.rawIncome) {
       feel.heat(st.throttle < 1);
       setHidden(el.throttle, st.throttle >= 1);
@@ -1091,19 +1242,27 @@
         setText(el.throttle, `${Math.floor(st.throttle * 100)}% speed · −${rate(st.rawIncome - st.income)} · Buy cooling.`);
       }
     }
-    if (previous?.heat !== st.heat || previous?.cooling !== st.cooling) {
+    if (previous?.freeLoad !== st.freeLoad) {
+      setHidden(el.orbitalHeatRule, signature.freeLoad <= 1);
+      if (signature.freeLoad > 1) setText(el.orbitalHeatRule, 'Full speed up to ' + percent.format(signature.freeLoad) + ' heat in orbit');
+    }
+    if (previous?.heat !== st.heat || previous?.cooling !== st.cooling || previous?.freeLoad !== st.freeLoad) {
+      if (st.throttle >= 1) {
+        const headroom = E.formatNumber(round1(st.freeLoad * st.cooling - st.heat));
+        setText(el.reserve, 'Full speed · ' + headroom + (st.freeLoad > 1 ? ' heat to spare' : ' cooling to spare'));
+      }
       const pct = Math.round(st.load * 100);
-      if (st.throttle >= 1) setText(el.reserve, `Full speed · ${E.formatNumber(round1(st.cooling - st.heat))} cooling to spare`);
       setText($('heat-percent'), pct + '%');
       setText(el.heatText, `${E.formatNumber(round1(st.heat))} heat / ${E.formatNumber(round1(st.cooling))} cooling (${pct}%)`);
-      setFill(el.heatFill, st.load);
-      el.heatFill.classList.toggle('warm', st.load >= 0.9 && st.load <= 1);
-      el.heatFill.classList.toggle('hot', st.load > 1);
+      const capacityUsed = st.load / st.freeLoad;
+      setFill(el.heatFill, capacityUsed);
+      el.heatFill.classList.toggle('warm', capacityUsed >= 0.9 && capacityUsed <= 1);
+      el.heatFill.classList.toggle('hot', capacityUsed > 1);
     }
 
     setText($('run-number'), 'Run ' + String(state.runs + 1).padStart(2, '0'));
-    renderPower(st);
-    renderFire(st);
+    renderPower(st, signature);
+    renderFire(st, signature);
     renderGoal();
     if (el.room.dataset.location !== state.location || el.room.dataset.extraLocation !== (state.extraLocation || '')) {
       const loc = LOCATIONS[state.location];
@@ -1112,8 +1271,9 @@
       setText(el.location, loc.name);
       setText(el.roomTitle, loc.room);
       const terms = [];
+      if (E.currentStage(state) > 2) terms.push('Stage ' + E.currentStage(state));
       if (state.extraLocation) terms.push(`Franchise bonus from ${LOCATIONS[state.extraLocation].name}`);
-      if (state.location === 'mall' || state.extraLocation === 'mall') {
+      if (E.hasSite(state, 'mall')) {
         terms.push(`${percent.format(1 - LOCATIONS.mall.effect.priceMult)} off machines and cooling`);
       }
       setText(el.roomTerms, terms.join(' · '));
@@ -1228,34 +1388,44 @@
 
   function renderGoal() {
     const goal = E.goalStrip(state);
-    const moving = goal.phase === 'move';
-    const selling = goal.phase === 'ready';
+    const firstMove = goal.phase === 'move';
+    const relocating = firstMove || goal.phase === 'expand';
+    const saleBar = goal.phase === 'ready';
+    const selling = goal.canSell;
     setHidden(el.reputation, !state.stars);
     if (state.stars) setText(el.reputation, `${state.stars.toLocaleString('en-US')} stars · ${runStarBonus()}`);
     if (el.goal.dataset.phase !== goal.phase) {
       el.goal.dataset.phase = goal.phase;
-      el.goalTrack.setAttribute('aria-labelledby', selling ? 'goal-detail' : 'goal-title');
+      el.goalTrack.setAttribute('aria-labelledby', saleBar ? 'goal-detail' : 'goal-title');
     }
-    UIIcons.paint(el.goalIcon, moving ? 'move' : 'sale');
+    UIIcons.paint(el.goalIcon, relocating ? 'move' : 'sale');
     const amount = Math.floor(Math.min(goal.current, goal.target));
-    const title = selling ? `Sell now for +${goal.pendingStars.toLocaleString('en-US')} stars` :
-      `${moving ? 'Move out' : 'Sell the startup'}: ${wholeDollars.format(amount)} / ${compactGoal.format(goal.target)} this run`;
+    const title = saleBar ? `Sell now for +${goal.pendingStars.toLocaleString('en-US')} stars` :
+      `${firstMove ? 'Move out' : relocating ? 'Expand' : 'Sell the startup'}: ${exactMoney(amount)} / ${shortMoney(goal.target)} this run`;
     setText(el.goalTitle, title);
     let detail = '';
-    if (selling || (!moving && state.lifetime >= E.PRESTIGE.unlockLifetime && goal.nextStarAt)) {
-      detail = `Next star at ${wholeDollars.format(goal.nextStarAt)} all-time`;
-      if (selling && goal.doubleAt) detail += ` · Doubles your bonus at ${wholeDollars.format(goal.doubleAt)}`;
+    if (selling && goal.nextStarAt) {
+      const sale = saleBar ? '' : `Sell for +${goal.pendingStars.toLocaleString('en-US')} stars · `;
+      detail = sale + `Next star at ${shortMoney(goal.nextStarAt)} all-time`;
+      if (selling && goal.doubleAt) detail += ` · Doubles your bonus at ${exactMoney(goal.doubleAt, 'ceil')}`;
+    }
+    if (!firstMove && !selling && !detail) {
+      detail = state.lifetime < E.PRESTIGE.unlockLifetime
+        ? `Sell from ${shortMoney(E.PRESTIGE.unlockLifetime)} this run.`
+        : `Next sale star at ${shortMoney(goal.nextStarAt)} all-time.`;
     }
     setText(el.goalDetail, detail);
     setHidden(el.goalDetail, !detail);
     setFill(el.goalFill, goal.progress);
     const pct = String(Math.floor(goal.progress * 100));
     if (el.goalTrack.getAttribute('aria-valuenow') !== pct) el.goalTrack.setAttribute('aria-valuenow', pct);
-    const moveReady = moving && goal.ready;
+    const moveReady = relocating && goal.ready;
+    setText(el.moveBtn, firstMove ? 'Move out' : 'Expand');
     setHidden(el.moveBtn, !moveReady);
     setHidden(el.sellBtn, !selling);
-    setHidden($('board-btn'), moving || state.stars < E.BOARD_STARS);
-    setHidden(el.goalActions, !moveReady && !selling && (moving || state.stars < E.BOARD_STARS));
+    const boardAvailable = !firstMove && state.stars >= E.BOARD_STARS;
+    setHidden($('board-btn'), !boardAvailable);
+    setHidden(el.goalActions, !moveReady && !selling && !boardAvailable);
     const challenge = E.CHALLENGES.find(def => def.id === state.challenge);
     const challengeLine = $('board-completion');
     setHidden(challengeLine, !challenge);
@@ -1268,10 +1438,310 @@
         log(`Board challenge complete: ${challenge.name}. ${challenge.reward}`, 'big');
       }
     }
-    el.moveBtn.classList.toggle('awaiting-tap', moveReady && !state.flags.moveChoiceSeen);
-    if (!moving && el.modal.open && saleQuote?.isConnected) renderSaleQuote();
-    if (moveReady && !previousMoveReady) feel.move();
+    el.moveBtn.classList.toggle('awaiting-tap', moveReady && !state.flags[firstMove ? 'moveChoiceSeen' : 'expandChoiceSeen:' + E.nextStage(state).number]);
+    if (selling && el.modal.open && saleQuote?.isConnected) renderSaleQuote();
+    if (moveReady && !previousMoveReady) feel.move(firstMove ? 'Move-out unlocked!' : 'A new site is available!');
     previousMoveReady = moveReady;
+    renderNextStep();
+    renderContracts();
+  }
+
+  // One compact "Next step" line under the long-term objective. economy.js picks the step;
+  // this shows it, links to the shop row it is about, and announces only when the advice
+  // itself changes (never each new dollar amount).
+  const nextStepUI = { box: $('next-step'), text: $('next-step-text'), action: $('next-step-action'),
+    announce: $('next-step-announcement') };
+  const NEXT_STEP_TIPS = { heat: 'heat', sibling: 'staff' }; // transient tips this line replaces
+  let nextStep = null, nextStepKey, nextStepFor = null;
+
+  function nextStepCopy(step) {
+    if (step.id === 'heat') return { text: `Heat is costing ${rate(step.loss)}.`, action: 'Open Cooling' };
+    if (step.id === 'sibling') {
+      return { text: `Hire Little Sibling (${money(step.price)}) to run jobs automatically.`, action: 'View Staff' };
+    }
+    const offer = `Old Laptop: ${money(step.price)}, earns ${rate(step.earns)} by itself.`;
+    return step.ready ? { text: offer, action: 'View laptop' } : { text: `${offer} Earn ${money(step.shortfall)} more by running jobs.`, action: '' };
+  }
+
+  function renderNextStep() {
+    const step = guidance.tipsEnabled() ? E.nextStep(state, E.stats(state)) : null;
+    const key = !step ? '' : step.id === 'laptop' ? 'laptop:' + (step.ready ? 'ready' : 'short') : step.id;
+    // A new page, an imported save or a Tips change is not news; only changes during play are announced.
+    const quiet = nextStepFor !== state || nextStepKey === undefined;
+    nextStep = step;
+    setHidden(nextStepUI.box, !step);
+    if (step) {
+      const copy = nextStepCopy(step);
+      nextStepUI.box.dataset.step = step.id;
+      setText(nextStepUI.text, copy.text);
+      setText(nextStepUI.action, copy.action);
+      setHidden(nextStepUI.action, !copy.action);
+    }
+    if (key !== nextStepKey && !quiet) {
+      const recovered = nextStepKey === 'heat' ? 'Full speed again.' : '';
+      const news = step ? 'Next step: ' + nextStepCopy(step).text : '';
+      nextStepUI.announce.textContent = [recovered, news].filter(Boolean).join(' ');
+    }
+    nextStepKey = key;
+    nextStepFor = state;
+  }
+
+  // The tip this line already covers, so the same advice never appears twice.
+  const nextStepTip = () => (nextStep && !nextStepUI.box.hidden ? NEXT_STEP_TIPS[nextStep.id] : undefined);
+
+  // Open the panel the step is about and bring its row into view. Buying still happens
+  // on the row itself, through the normal purchase flow.
+  function revealShopRow(kind, item) {
+    window.GameShell?.open(kind === 'staff' ? 'staff' : 'shop');
+    const tab = shopTabs.get(kind)?.button;
+    if (kind !== 'staff' && tab && !tab.hidden && tab.getAttribute('aria-selected') !== 'true') tab.click();
+    const target = item ? document.querySelector(`.card[data-kind="${kind}"][data-item="${item}"]`) : tab;
+    if (!target || target.hidden || !target.isConnected) return;
+    const scroller = $('sheet-scroll');
+    const view = scroller.getBoundingClientRect(), box = target.getBoundingClientRect();
+    const controls = kind === 'staff' ? 0 : (document.querySelector('.shop-controls')?.offsetHeight || 0);
+    const top = view.top + controls + 8, bottom = view.bottom - 8;
+    if (box.top < top) scroller.scrollTop -= top - box.top;
+    else if (box.bottom > bottom) scroller.scrollTop += Math.min(box.bottom - bottom, box.top - top);
+    // An unaffordable row is a disabled button; its details control names the same item.
+    const focusable = target.disabled ? target.closest('.card-row')?.querySelector('summary') : target;
+    (focusable || target).focus({ preventScroll: true });
+    if (item) {
+      target.classList.remove('guided');
+      void target.offsetWidth;
+      target.classList.add('guided');
+      setTimeout(() => target.classList.remove('guided'), 1600);
+    }
+  }
+
+  nextStepUI.action.addEventListener('click', () => {
+    if (nextStep?.id === 'heat') revealShopRow('cooler');
+    else if (nextStep?.id === 'laptop') revealShopRow('machine', 'laptop');
+    else if (nextStep?.id === 'sibling') revealShopRow('staff', 'sibling');
+  });
+
+  // ---------------------------------------------------------------------------
+  // Client contracts. economy.js owns the terms, progress and rewards; this shows the board in
+  // the Goals sheet and one status line under the goal, and signs or ends contracts.
+  // ---------------------------------------------------------------------------
+  const contractUI = {
+    line: $('contract-line'), lineText: $('contract-line-text'), lineAction: $('contract-line-action'),
+    announce: $('contract-announcement'), lock: $('contracts-lock'), intro: $('contracts-intro'),
+    active: $('contract-active'), offers: $('contract-offers'), locked: $('contracts-locked'),
+    receipt: $('contracts-receipt'), dot: $('contracts-dot'), end: $('contract-end'),
+    track: $('contract-track'), fill: $('contract-fill'), heading: $('contracts-heading'),
+  };
+  const contractOfferRows = new Map();
+  let contractKey, contractFor = null, contractEndArmedUntil = 0;
+  const contractMinutes = seconds => (seconds % 60 === 0 ? `${seconds / 60} min` : E.formatDuration(seconds));
+  const contractClock = seconds => {
+    const whole = Math.max(0, Math.ceil(seconds));
+    return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+  };
+  const contractDef = id => E.CONTRACTS.find(def => def.id === id);
+  const wholePercent = fraction => `${Math.round(fraction * 100)}%`;
+
+  function contractTermsText(def, terms) {
+    const time = contractMinutes(terms.durationSeconds);
+    if (def.requirement === 'income') return `Keep machine income at ${rate(terms.target)} or more for ${time}.`;
+    if (def.requirement === 'capacity') return `Build machine income up to ${rate(terms.target)}, then hold it for ${time}.`;
+    if (def.requirement === 'headroom') return `Keep heat at ${wholePercent(def.maxLoad)} of cooling or less for ${time}.`;
+    return `Run Power at ${wholePercent(def.minPower)} or more, at full speed, for ${time}.`;
+  }
+
+  // Why the contract isn't counting, in a few words for the strip and in full for the board.
+  function contractHold(status) {
+    const def = status.def;
+    if (def.requirement === 'capacity' && status.value < status.need) {
+      return { state: 'building', short: 'building capacity',
+        long: `Building capacity · ${rate(status.value)} of ${rate(status.need)} machine income` };
+    }
+    if (def.requirement === 'income' || def.requirement === 'capacity') {
+      return { state: 'paused', short: 'paused, income too low',
+        long: `Paused · machine income ${rate(status.value)}, needs ${rate(status.need)}` };
+    }
+    if (def.requirement === 'headroom') {
+      return { state: 'paused', short: 'paused, heat too high',
+        long: `Paused · heat ${wholePercent(status.value)} of cooling, needs ${wholePercent(status.need)} or less` };
+    }
+    if (status.value < status.need - 1e-9) {
+      return { state: 'paused', short: `paused, Power below ${wholePercent(status.need)}`,
+        long: `Paused · Power ${wholePercent(status.value)}, needs ${wholePercent(status.need)} or more` };
+    }
+    return { state: 'paused', short: 'paused, machines slowed by heat',
+      long: 'Paused · machines are slowed by heat. Add cooling to resume.' };
+  }
+
+  function announceContract(text) {
+    contractUI.announce.textContent = text;
+  }
+
+  function contractSeenKey(offers) {
+    return offers.filter(offer => offer.available).map(offer => offer.id).join(',');
+  }
+
+  function markContractsSeen() {
+    const key = contractSeenKey(E.contractOffers(state, lastStats ?? E.stats(state)));
+    if (key && state.flags.contractsSeen !== key) {
+      state.flags.contractsSeen = key;
+      renderContracts();
+    }
+  }
+
+  function buildOfferRow(def) {
+    const item = make('li', 'contract-card');
+    const top = make('div', 'contract-top');
+    const icon = make('span', 'contract-icon');
+    icon.setAttribute('aria-hidden', 'true');
+    UIIcons.paint(icon, def.icon);
+    const names = make('div', 'contract-names');
+    names.append(make('strong', null, def.name), make('span', 'contract-client', def.client));
+    const reward = make('span', 'contract-reward');
+    const amount = make('strong');
+    reward.append(amount, make('small', null, `${def.rewardSeconds}s of income`));
+    top.append(icon, names, reward);
+    const terms = make('p', 'contract-terms');
+    const button = make('button', 'contract-sign');
+    button.type = 'button';
+    button.addEventListener('click', () => signContractFromBoard(def.id));
+    item.append(top, make('p', 'contract-pitch', def.pitch), terms, make('p', 'contract-tradeoff', def.tradeoff), button);
+    return { item, reward: amount, terms, button };
+  }
+
+  function renderContracts() {
+    const st = lastStats ?? E.stats(state);
+    const offers = E.contractOffers(state, st);
+    const status = E.contractStatus(state, st);
+    const locked = offers.every(offer => offer.lock === 'machines') && !status;
+    const available = offers.filter(offer => offer.available);
+    const seenKey = contractSeenKey(offers);
+    const newOffers = !status && available.length > 0 && state.flags.contractsSeen !== seenKey;
+    setHidden(contractUI.dot, !newOffers);
+
+    // The status line under the goal appears only while a contract is signed, so opening a
+    // panel never moves the room. New offers light the Goals tab's dot instead.
+    const hold = status && !status.met ? contractHold(status) : null;
+    setHidden(contractUI.line, !status);
+    if (status) {
+      const lineState = hold ? hold.state : 'running';
+      if (contractUI.line.dataset.state !== lineState) contractUI.line.dataset.state = lineState;
+      const pct = Math.floor(status.progress * 100);
+      setText(contractUI.lineText, `${status.def.name} · ${pct}% · ` +
+        (hold ? hold.short : `${contractClock(status.remainingSeconds)} left`));
+    }
+
+    // Announce changes in what the player should do, never each passing second.
+    const key = status ? `${status.id}:${hold ? hold.state : 'running'}` : '';
+    if (contractFor === state && contractKey !== undefined && key !== contractKey && status) {
+      announceContract(hold ? `${status.def.name}: ${hold.long}.` : `${status.def.name} is on track.`);
+    }
+    contractKey = key;
+    contractFor = state;
+
+    // The board.
+    setHidden(contractUI.lock, !locked);
+    if (locked) setText(contractUI.lock, offers[0].lockText);
+    setHidden(contractUI.intro, locked);
+    setHidden(contractUI.active, !status);
+    setHidden(contractUI.offers, locked || Boolean(status));
+    if (status) {
+      const card = contractUI.active;
+      if (card.dataset.id !== status.id) {
+        card.dataset.id = status.id;
+        UIIcons.paint($('contract-active-icon'), status.def.icon);
+        setText($('contract-active-name'), status.def.name);
+        setText($('contract-active-client'), status.def.client);
+        setText($('contract-active-tradeoff'), status.def.tradeoff);
+      }
+      if (card.dataset.state !== (hold ? hold.state : 'running')) card.dataset.state = hold ? hold.state : 'running';
+      setText($('contract-active-reward'), '+' + money(status.contract.reward));
+      setText($('contract-active-terms'), contractTermsText(status.def, status.contract));
+      setText($('contract-active-status'), hold ? hold.long : `On track · ${contractClock(status.remainingSeconds)} left`);
+      setFill(contractUI.fill, status.progress);
+      const pct = String(Math.floor(status.progress * 100));
+      if (contractUI.track.getAttribute('aria-valuenow') !== pct) contractUI.track.setAttribute('aria-valuenow', pct);
+      const armed = performance.now() < contractEndArmedUntil;
+      setText(contractUI.end, armed ? 'Tap again to end · progress is lost' : 'End contract');
+      if (contractUI.end.dataset.confirm !== String(armed)) contractUI.end.dataset.confirm = String(armed);
+    } else if (!locked) {
+      for (const [id, row] of contractOfferRows) {
+        if (available.some(offer => offer.id === id)) continue;
+        row.item.remove();
+        contractOfferRows.delete(id);
+      }
+      available.forEach((offer, index) => {
+        let row = contractOfferRows.get(offer.id);
+        if (!row) {
+          row = buildOfferRow(offer.def);
+          contractOfferRows.set(offer.id, row);
+          contractUI.offers.insertBefore(row.item, contractUI.offers.children[index] || null);
+        }
+        const reward = money(offer.reward);
+        setText(row.reward, '+' + reward);
+        setText(row.terms, contractTermsText(offer.def, offer));
+        setText(row.button, 'Sign · ' + reward);
+        const label = `Sign ${offer.def.name} for ${reward}`;
+        if (row.button.getAttribute('aria-label') !== label) row.button.setAttribute('aria-label', label);
+      });
+    }
+    const next = offers.find(offer => offer.lock && offer.lock !== 'machines');
+    setText(contractUI.locked, !locked && next ? `More clients: ${next.def.name}. ${next.lockText}` : '');
+  }
+
+  function signContractFromBoard(id) {
+    if (modalOpen() || !settleBeforePurchaseOrMove()) return;
+    const result = E.signContract(state, id);
+    if (!result.ok) { renderContracts(); return; }
+    const def = contractDef(id);
+    contractEndArmedUntil = 0;
+    log(`Signed ${def.name} with ${def.client}.`, 'good');
+    setText(contractUI.receipt, '');
+    announceContract(`Signed ${def.name}. ${contractTermsText(def, result.contract)}`);
+    contractKey = undefined; // The next render records the new state without announcing over this.
+
+    render();
+    save();
+    $('sheet-scroll').scrollTop = 0;
+    contractUI.active.focus({ preventScroll: true });
+  }
+
+  contractUI.end.addEventListener('click', () => {
+    if (!state.contract || modalOpen()) return;
+    const now = performance.now();
+    if (now >= contractEndArmedUntil) {
+      contractEndArmedUntil = now + 4000;
+      renderContracts();
+      return;
+    }
+    if (!settleBeforePurchaseOrMove()) return;
+    const result = E.endContract(state);
+    contractEndArmedUntil = 0;
+    if (!result.ok) return;
+    const def = contractDef(result.contract.id);
+    log(`Ended ${def.name} early. ${def.client} found someone else.`);
+    announceContract(`Ended ${def.name}. Choose another client when you're ready.`);
+    render();
+    save();
+    contractUI.heading.focus({ preventScroll: true });
+  });
+
+  contractUI.lineAction.addEventListener('click', () => {
+    window.GameShell?.open('goals');
+    $('sheet-scroll').scrollTop = 0;
+    markContractsSeen();
+  });
+  document.addEventListener('game-panel', event => {
+    if (event.detail === 'goals') markContractsSeen();
+  });
+
+  function contractComplete(notice) {
+    const def = contractDef(notice.id);
+    const amount = '+' + money(notice.reward);
+    log(`${def.name} for ${def.client} complete · ${amount}`, 'big');
+    setText(contractUI.receipt, `Last contract: ${def.name} paid ${money(notice.reward)}.`);
+    announceContract(`${def.name} complete. ${def.client} paid ${money(notice.reward)}.`);
+    const anchor = !contractUI.line.hidden ? contractUI.line : el.room;
+    feel.goalReward(centerOf(anchor), amount);
   }
 
   const round1 = (n) => Math.round(n * 10) / 10;
@@ -1309,6 +1779,11 @@
     basement: "Mom stands at the top of the basement stairs holding the good dish towel. Nobody makes eye contact.",
     warehouse: "The Arctic Warehouse finally thaws. Facilities would like a word.",
     office: "The fire drill gets five stars for realism. The office manager takes away your clipboard.",
+    dam: 'The dam survives. The soggy claim form takes longer to dry.',
+    penthouse: 'The building manager adds a line about server racks to the lease.',
+    bunker: 'The bunker alarm demands a written explanation.',
+    orbital: 'Ground control would like its fire blanket back.',
+    volcano: 'The insurer asks whether the lava was already there.',
     mall: "For the first time in years, the mall directory lights up. Several stores ask for a refund.",
   };
   const fireFeedback = { alarmRepeatMs: 1800, momentMs: 3000 };
@@ -1323,10 +1798,10 @@
     setText(el.firePayout, '');
   }
 
-  function renderFire(st) {
+  function renderFire(st, signature) {
     const fire = E.fireStatus(state, st);
     const watching = !suspended && !document.hidden && !modalOpen();
-    setHidden(el.fireRisk, !fire.risk);
+    setHidden(el.fireRisk, signature.fireproof || !fire.risk);
     if (el.fireRisk.dataset.stage !== fire.stage) el.fireRisk.dataset.stage = fire.stage;
     if (fire.risk) {
       setText(el.fireRiskValue, Math.min(99, Math.ceil(fire.risk * 100)) + '%');
@@ -1449,6 +1924,8 @@
     for (const notice of notices) {
       if (notice.type === 'fire' || notice.type.startsWith('fire-')) {
         handleFireNotice(notice);
+      } else if (notice.type === 'contract-complete') {
+        contractComplete(notice);
       } else if (notice.type === 'offer') {
         const def = incidentTypes.get(notice.event.id);
         log(def.title, def.id === 'heatwave' ? 'warn' : 'big');
@@ -1565,23 +2042,31 @@
   }
 
   function showLocationMap() {
-    const moved = state.location !== 'basement';
-    const route = make('ol', moved ? 'run-map has-route' : 'run-map');
+    const sites = E.runSites(state);
+    const route = make('ol', 'run-map');
     route.setAttribute('aria-label', 'Locations this run');
-    for (const id of moved ? ['basement', state.location] : ['basement']) {
+    for (const [i, id] of sites.entries()) {
       const loc = LOCATIONS[id];
-      const current = id === state.location;
+      const current = i === sites.length - 1;
       const stop = make('li', 'map-stop');
       if (current) stop.setAttribute('aria-current', 'location');
       const pin = UIIcons.paint(make('span', 'map-pin'), loc.icon || 'home');
       pin.setAttribute('aria-hidden', 'true');
       const label = make('div', 'map-label');
-      label.append(make('strong', null, loc.name), make('span', null, current ? 'You are here' : 'Started here'));
+      label.append(make('strong', null, loc.name), make('span', null,
+        `Stage ${i + 1} · ${current ? 'You are here' : i === 0 ? 'Started here' : 'Branch'}`));
+      if (loc.signature) label.append(para(loc.signature));
+      if (loc.desc) label.append(para(loc.desc));
+      if (i === 1 && state.extraLocation) {
+        const extra = LOCATIONS[state.extraLocation];
+        label.append(para(`Franchise branch · ${extra.name}. ${extra.desc}`));
+      }
       stop.append(pin, label);
       route.appendChild(stop);
     }
     const body = [route];
-    if (!moved) body.push(para('Your next stop appears when you move out.', 'map-hint'));
+    const next = E.nextStage(state);
+    if (next) body.push(para(`Next: ${next.name} at ${shortMoney(next.target)} earned this run.`, 'map-hint'));
     openModal('Map of this run', body, [{ label: 'Close' }]);
   }
 
@@ -1603,7 +2088,7 @@
       items.set(name, (items.get(name) || 0) + 1);
     }
     const bundle = [...items].map(([name, count]) => count > 1 ? count + ' × ' + name : name).join(' + ');
-    const price = wholeDollars.format(plan.cost);
+    const price = exactMoney(plan.cost, 'ceil');
     const seconds = E.secondsToAfford(plan.cost, state.money, E.stats(state).income);
     const wait = seconds > 0 ? E.formatDuration(Math.ceil(seconds)) : '';
     setText(away.copy, affordable ? `Best buy now: ${bundle} (${price})` :
@@ -1618,7 +2103,9 @@
     away.siblingJobs += report.siblingJobs || 0;
     away.throttleSeconds += report.throttle * report.credited;
     for (const notice of report.notices) {
-      if (notice.away) {
+      if (notice.type === 'contract-complete') {
+        away.resolutions.add(`${contractDef(notice.id).name} complete (+${money(notice.reward)})`);
+      } else if (notice.away) {
         const title = incidentTypes.get(notice.id).title;
         away.resolutions.add(title + (notice.type === 'ended' ? ' — effect ended' : ' — offer expired'));
       }
@@ -1703,24 +2190,42 @@
       b.type = 'button';
       if (primary) b.dataset.extraLocation = id;
       else b.dataset.location = id;
-      b.append(make('strong', null, `${loc.name}`), make('span', null, loc.desc));
+      b.append(UIIcons.paint(make('span', 'choice-pin'), loc.icon));
+      if (loc.signature) {
+        b.append(make('span', 'site-name', loc.name), make('strong', 'site-rule', loc.signature));
+        if (loc.effect.machinePriceMult > 1) {
+          b.append(make('span', 'site-caveat', 'Machines cost ' + percent.format(loc.effect.machinePriceMult - 1) + ' more.'));
+        }
+        if (id === 'bunker' && state.challenge === 'bootstrapped') {
+          b.append(make('span', 'site-caveat', 'Staff are unavailable during Bootstrapped.'));
+        }
+      } else {
+        b.append(make('strong', null, loc.name), make('span', null, loc.desc));
+      }
       b.addEventListener('click', () => {
         if (!primary) {
           const extras = E.franchiseChoices(state, id);
           if (extras.length) {
-            openModal('Choose your Franchise bonus', [
-              para(`Your room will be in the ${LOCATIONS[id].name}. Pick a second location for its bonus this run.`),
+            openModal('Choose your Franchise branch', [
+              para(`Your room will be in the ${LOCATIONS[id].name}. Pick another stage-2 site as a branch. Its bonus stays with you through later expansions.`),
               locationChoices(extras, id),
             ], [{ label: 'Back', onClick: showMoveChoice }]);
             return;
           }
         }
         if (!settleBeforePurchaseOrMove()) return;
-        if (E.moveTo(state, primary || id, Date.now(), primary ? id : null).ok) {
+        const move = E.moveTo(state, primary || id, Date.now(), primary ? id : null);
+        if (move.ok) {
           el.modal.close();
           for (const card of cards) card.quote = null;
           roomKey = '';
           checkStory(render());
+          if (move.freeHires?.length) {
+            const names = move.freeHires.map(hire => E.lookup('staff', hire).name).join(' and ');
+            const receipt = 'Hired for free: ' + names;
+            log(receipt, 'good');
+            feel.showMoment(receipt, false);
+          }
           save();
         }
       });
@@ -1731,15 +2236,21 @@
 
   function showMoveChoice() {
     if (!E.canMove(state)) return;
-    state.flags.moveChoiceSeen = true;
+    const next = E.nextStage(state);
+    const first = next.number === 2;
+    state.flags[first ? 'moveChoiceSeen' : 'expandChoiceSeen:' + next.number] = true;
     el.moveBtn.classList.remove('awaiting-tap');
     save();
     const ids = E.moveDestinations(state);
-    const hardware = state.runs ? 'Moving unlocks GPU Rigs and makes AI Training Clusters available to discover.' : 'Both locations unlock GPU Rigs.';
-    openModal('Time to move out', [
-      para(`You've earned ${moveGoalText} this run. Pick your new home. ${hardware} After selling the startup, you can choose again.`),
-      locationChoices(ids),
-    ], [{ label: 'Not yet' }]);
+    const body = [para(first
+      ? `You earned ${shortMoney(next.target)} this run. Pick your first space outside the basement.`
+      : `You earned ${shortMoney(next.target)} this run. Your team and equipment move with you. Earlier sites stay open.`)];
+    const machine = E.lookup('machine', first && !state.runs ? 'gpu' : next.machineUnlock);
+    const unlock = make('p', 'stage-unlock');
+    const name = first && state.runs ? 'GPU Rig and ' + machine.name : machine.name;
+    unlock.append(UIIcons.paint(make('span'), machine.icon), make('span', null, 'Unlocks: ' + name));
+    body.push(unlock, locationChoices(ids));
+    openModal(`Stage ${next.number} · ${next.name}`, body, [{ label: 'Not yet' }]);
   }
 
   function renderSaleQuote() {
@@ -1762,7 +2273,7 @@
       ['Best income/s', rate(summary.bestIncome)],
       ['Machines owned', summary.machines.toLocaleString('en-US')],
       ['Run length', summary.durationSeconds === null ? 'Not recorded' : E.formatDuration(summary.durationSeconds)],
-      ['Location', LOCATIONS[summary.location].name],
+      ['Sites this run', E.runSites(state).map(id => LOCATIONS[id].name).join(' → ')],
     ];
     for (const [label, value] of rows) {
       const row = make('div');
@@ -1820,7 +2331,7 @@
     if (state.machines.laptop) details.push(`Starter Kit: ${state.machines.laptop} laptops ready`);
     if (state.coolers.fan) details.push(`${state.coolers.fan} Box Fan${state.coolers.fan === 1 ? '' : 's'}`);
     if (state.upgrades.includes('macros')) details.push('Keyboard Macros');
-    if (E.runStartCash(state)) details.push(`${wholeDollars.format(E.runStartCash(state))} starting cash`);
+    if (E.runStartCash(state)) details.push(`${exactMoney(E.runStartCash(state))} starting cash`);
     if (state.staff.sibling) details.push(`Little Sibling Lv. ${state.staff.sibling}`);
     if (state.staff.sysadmin) details.push('Sysadmin hired');
     const challenge = E.CHALLENGES.find(def => def.id === state.challenge);
@@ -1842,9 +2353,9 @@
     renderSaleQuote();
     openModal('Sell the startup?', [
       saleQuote,
-      para('Keep your Investor Reputation, investor perks, achievements, all-time earnings, stats and records.' +
+      para('Keep your Investor Reputation, investor perks, achievements, decorations, all-time earnings, stats and records.' +
         (state.challengeRewards.length ? ' Your Board rewards carry over too.' : '')),
-      para('Your machines, cooling, upgrades and staff go with the company. Current incidents and offers end. Your starting perks apply when you reopen in the basement.'),
+      para('Your sites, machines, cooling, upgrades and staff go with the company. Current incidents and offers end. Your starting perks apply when you reopen in the basement.'),
       ...(picker ? [picker.wrap] : []),
     ], [
       { label: 'Not yet', style: 'primary' },
@@ -1870,6 +2381,7 @@
   }
 
   function resetRunView() {
+    decorStudio.close();
     if (pendingStaffOrders.length) showStaffOrders();
     lastManagerPurchase = -Infinity;
     nextStaffPaint = 0;
@@ -1925,13 +2437,76 @@
   }
   el.jobBtn.addEventListener('click', runManualJob);
   el.room.addEventListener('click', ev => {
+    if (decorStudio.roomClick(ev)) return;
     if (!ev.target.closest('button, a, input, [role="button"]')) runManualJob(ev);
   });
   el.room.addEventListener('contextmenu', ev => ev.preventDefault());
   el.jobBtn.addEventListener('contextmenu', ev => ev.preventDefault());
+
+  // Keyboard shortcuts on a computer: Space runs a job, 1–4 pick ×1/×10/×100/Max, and
+  // M/C/U/H open the Machines, Cooling, Upgrades and Hires (Staff) shop tabs. Held keys don't
+  // repeat jobs, typing in a field is never intercepted, and dialogs keep their own keys.
+  const SHORTCUT_QUANTITY = { 1: '1', 2: '10', 3: '100', 4: 'max' };
+  const SHORTCUT_TABS = { m: 'machine', c: 'cooler', u: 'upgrade', h: 'staff' };
+  document.addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || !state) return;
+    if (document.querySelector('dialog[open]')) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    if (key === ' ') {
+      // Space on a focused button or link already presses that control.
+      if (target?.closest('button, a, summary, [role="button"]')) return;
+      event.preventDefault();  // no page scroll
+      if (!event.repeat && !el.jobBtn.disabled) runManualJob(new Event('keyboard'));
+      return;
+    }
+    if (event.repeat) return;
+    const amount = SHORTCUT_QUANTITY[key];
+    if (amount) {
+      const radio = quantityControl.querySelector(`input[value="${amount}"]`);
+      if (radio && !radio.checked) {
+        radio.checked = true;
+        radio.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      return;
+    }
+    const tab = shopTabs.get(SHORTCUT_TABS[key]);
+    if (tab && !tab.button.hidden) tab.button.click();
+  });
   el.moveBtn.addEventListener('click', showMoveChoice);
   $('location-map')?.addEventListener('click', showLocationMap);
   el.sellBtn.addEventListener('click', showRunSummary);
+  // Settings → Numbers: Standard ($4.20Qa), Scientific ($4.20e15) or Engineering ($4.20e15 / $42.0e15).
+  // A display preference for this device; the save never changes.
+  const notationButton = $('notation-toggle');
+  const notationNames = { standard: 'Standard', scientific: 'Scientific', engineering: 'Engineering' };
+  function paintNotation() {
+    setText(notationButton, 'Numbers: ' + notationNames[E.getNotation()]);
+  }
+  function refreshNumberText() {
+    paintedIncome = paintedStaffIncome = undefined;
+    feel.refreshMoneyText();
+    for (const card of cards) {
+      card.displayedQuote = card.lastShortfall = card.lockedText = card.statValue = card.detailValue = null;
+      delete card.cost.dataset.amountKey;
+      delete card.shortfall.dataset.amountKey;
+    }
+    shopStructure = '';
+    shopMoney = undefined;
+    if (lastStats) setText(el.jobValue, '+' + money(lastStats.clickValue));
+    render();
+    updateTitle(true);
+  }
+  notationButton.addEventListener('click', () => {
+    const next = E.NOTATIONS[(E.NOTATIONS.indexOf(E.getNotation()) + 1) % E.NOTATIONS.length];
+    E.setNotation(next);
+    try { localStorage.setItem(NOTATION_KEY, next); } catch { /* Kept for this session. */ }
+    paintNotation();
+    refreshNumberText();
+  });
+  paintNotation();
+
   $('board-btn').addEventListener('click', showBoardRoom);
   $('stats-board-btn').addEventListener('click', showBoardRoom);
   el.perkDialog.addEventListener('cancel', event => event.preventDefault());
@@ -2094,7 +2669,7 @@
     return !suspended && document.visibilityState === 'visible' && seconds >= 0 && seconds <= CONFIG.eventLiveGapSeconds;
   }
 
-  function modalOpen() { return el.modal.open || el.perkDialog.open || el.settingsDialog?.open || achievementPanel.isOpen(); }
+  function modalOpen() { return el.modal.open || el.perkDialog.open || el.settingsDialog?.open || el.photoDialog.open || achievementPanel.isOpen(); }
 
   // A click can arrive ahead of the first timer after sleep. Pay for elapsed time
   // at the old production rate before a purchase or move changes that rate.
@@ -2176,6 +2751,203 @@
     };
   }
 
+  function createDecorationStudio() {
+    const openButton = $('decorate-btn'), done = $('decor-done'), workbench = $('decor-workbench');
+    const heading = $('decor-heading'), slots = $('decor-slots'), picker = $('decor-picker');
+    const items = $('decor-items'), use = $('decor-use'), reset = $('decor-default');
+    const back = $('decor-picker-close'), dot = $('decor-dot'), toast = $('decor-toast');
+    const shot = $('decor-snapshot'), photo = el.photoDialog, preview = $('decor-photo-preview');
+    const download = $('decor-download'), share = $('decor-share'), photoStatus = $('decor-photo-status');
+    const catalog = new Map(E.DECORATIONS.map(item => [item.id, item]));
+    let editing = false, slot = null, selected = null, previousState, equipped;
+    let unlockedCount = -1, toastUntil = 0, picture = null, photoURL = '', captureId = 0;
+
+    function paintRoom() {
+      const look = slot && selected ? { ...state.decor.equipped, [slot]: selected } : state.decor.equipped;
+      dollhouse.setDecor(look, editing, slot);
+      equipped = state.decor.equipped;
+    }
+
+    function paintSelection() {
+      for (const button of items.children) button.setAttribute('aria-pressed', String(button.dataset.decorItem === selected));
+      const current = state.decor.equipped[slot] || null;
+      use.disabled = !selected || current === selected;
+      setText(use, selected && current === selected ? 'In room' : 'Use');
+      setText($('decor-room-help'), selected ? (current === selected ? 'In room · ' : 'Preview · ') + catalog.get(selected).name : 'Choose an item to preview');
+      reset.disabled = !current && !selected;
+    }
+
+    function populate() {
+      items.replaceChildren();
+      for (const item of E.decorPicker(state, slot)) {
+        const button = make('button', 'decor-item');
+        button.type = 'button';
+        button.dataset.decorItem = item.id;
+        button.disabled = !item.unlocked;
+        const art = make('span', 'decor-art');
+        art.setAttribute('aria-hidden', 'true');
+        art.innerHTML = RoomScene.thumbnail(item.id);
+        button.append(art, make('span', 'decor-item-name', item.name));
+        if (!item.unlocked) {
+          const lock = make('span', 'decor-lock');
+          UIIcons.paint(lock, 'lock');
+          button.append(lock, make('small', 'decor-hint', 'How to unlock: ' + item.hint));
+        }
+        items.append(button);
+      }
+      paintSelection();
+    }
+
+    function chooseSlot(id, focus = true) {
+      if (!editing) return;
+      slot = id;
+      selected = id ? state.decor.equipped[id] || null : null;
+      const category = E.DECOR_SLOTS.find(entry => entry.id === id);
+      setText(heading, category?.name || 'Choose a spot');
+      setText($('decor-category'), category ? 'Room collection' : 'Decorate');
+      setHidden(slots, !!id);
+      setHidden(picker, !id);
+      setHidden(back, !id);
+      if (id) { populate(); items.scrollTop = 0; }
+      else setText($('decor-room-help'), 'Tap a spot to decorate');
+      setText($('decor-status'), '');
+      paintRoom();
+      if (focus) heading.focus({ preventScroll: true });
+    }
+
+    function setEditing(on) {
+      editing = on;
+      if (on) {
+        window.GameShell.close();
+        E.refreshDecor(state);
+        if (E.markDecorSeen(state)) save();
+        setHidden(dot, true);
+      }
+      document.body.classList.toggle('decorating', on);
+      openButton.setAttribute('aria-expanded', String(on));
+      setHidden(done, !on);
+      setHidden($('decor-tools'), !on);
+      setHidden(workbench, !on);
+      if (on) chooseSlot(null);
+      else {
+        slot = selected = null;
+        paintRoom();
+        openButton.focus({ preventScroll:true });
+      }
+    }
+
+    for (const entry of E.DECOR_SLOTS) {
+      const button = make('button', null, entry.name);
+      button.type = 'button';
+      button.addEventListener('click', () => chooseSlot(entry.id));
+      slots.append(button);
+    }
+    openButton.addEventListener('click', () => setEditing(true));
+    done.addEventListener('click', () => setEditing(false));
+    back.addEventListener('click', () => chooseSlot(null));
+    items.addEventListener('click', event => {
+      const card = event.target.closest('[data-decor-item]');
+      if (!card || card.disabled) return;
+      selected = card.dataset.decorItem;
+      paintRoom(); paintSelection();
+      setText($('decor-status'), 'Previewing ' + catalog.get(selected).name);
+    });
+    function apply(id) {
+      if (!E.equipDecor(state, slot, id)) return;
+      selected = id;
+      paintRoom(); paintSelection();
+      setText($('decor-status'), id ? catalog.get(id).name + ' is in your room.' : 'Default restored.');
+      save();
+    }
+    use.addEventListener('click', () => apply(selected));
+    reset.addEventListener('click', () => apply(null));
+    document.addEventListener('keydown', event => {
+      if (!editing || event.key !== 'Escape' || document.querySelector('dialog[open]')) return;
+      event.preventDefault();
+      if (slot) chooseSlot(null); else setEditing(false);
+    });
+    function roomClick(event) {
+      if (!editing) return false;
+      const handle = event.target.closest('[data-decor-slot]');
+      if (handle) chooseSlot(handle.dataset.decorSlot);
+      return true;
+    }
+
+    function releasePicture() {
+      captureId++;
+      if (photoURL) URL.revokeObjectURL(photoURL);
+      photoURL = ''; picture = null;
+      preview.removeAttribute('src');
+      setHidden(preview, true); setHidden(download, true); setHidden(share, true);
+    }
+    shot.addEventListener('click', async () => {
+      releasePicture();
+      const id = captureId;
+      setText(photoStatus, 'Preparing your snapshot…');
+      photo.showModal();
+      try {
+        const file = await RoomSnapshot.capture(el.room.querySelector('.dollhouse'));
+        if (captureId !== id || !photo.open) return;
+        picture = file;
+        photoURL = URL.createObjectURL(file);
+        preview.src = photoURL;
+        setHidden(preview, false); setHidden(download, false);
+        setHidden(share, !RoomSnapshot.canShare(file));
+        setText(photoStatus, '');
+      } catch {
+        if (captureId === id) setText(photoStatus, 'Couldn’t capture the room. Close this window and try again.');
+      }
+    });
+    $('decor-photo-close').addEventListener('click', () => photo.close());
+    photo.addEventListener('close', releasePicture);
+    download.addEventListener('click', () => { if (picture) RoomSnapshot.download(picture); });
+    share.addEventListener('click', async () => {
+      if (!picture) return;
+      try { await navigator.share({ files:[picture] }); }
+      catch (error) { if (error.name !== 'AbortError') setText(photoStatus, 'Sharing didn’t open. You can download the PNG instead.'); }
+    });
+
+    function sync(s, justAchieved) {
+      const loaded = previousState !== s;
+      if (loaded) {
+        previousState = s;
+        unlockedCount = -1;
+        toastUntil = 0;
+        setHidden(toast, true);
+      }
+      if (equipped !== s.decor.equipped) paintRoom();
+      // Reconcile a loaded collection once. After that, moves and sales grant
+      // their own items, and only new achievements need a collection check.
+      const added = (loaded || justAchieved) && E.refreshDecor(s).length > 0;
+      if (unlockedCount !== s.decor.unlocked.length) {
+        unlockedCount = s.decor.unlocked.length;
+        if (editing && slot) populate();
+        setHidden(dot, !s.decor.unseen.length);
+      }
+      if (!toastUntil && !s.decor.pending.length) return added;
+      const now = performance.now();
+      if (toastUntil) {
+        if (now < toastUntil) return added;
+        toastUntil = 0;
+        setHidden(toast, true);
+      }
+      if (!s.decor.pending.length || document.hidden || modalOpen()) return added;
+      const notice = E.takeDecorNotice(s);
+      if (notice) {
+        const first = catalog.get(notice.ids[0]);
+        const title = notice.summary ? notice.ids.length + ' decoration' + (notice.ids.length === 1 ? '' : 's') + ' unlocked' : 'Decoration unlocked: ' + first.name;
+        $('decor-toast-icon').innerHTML = RoomScene.thumbnail(first.id);
+        setText($('decor-toast-text'), title);
+        setHidden(toast, false);
+        toastUntil = now + 3400;
+        feel.decorUnlock();
+        return true;
+      }
+      return added;
+    }
+    return { sync, roomClick, close: () => { if (editing) setEditing(false); } };
+  }
+
   function createAchievementPanel({ state, feel, log, save }) {
     const opener = $('achievements-btn');
     const dialog = $('achievements-dialog');
@@ -2192,12 +2964,14 @@
     const whole = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
     const cash = value => '$' + whole.format(Math.floor(value));
     const statRows = [
+      ['decor', 'Collection', s => 'Decor ' + s.decor.unlocked.length + '/' + E.DECORATIONS.length],
       ['runs', 'Completed sales', s => whole.format(s.runs)],
       ['stars', 'Investor Reputation', s => whole.format(s.stars) + ' stars'],
       ['reputationBonus', 'Income and job pay bonus', s => starBonus(s.stars)],
       ['allTimeEarnings', 'All-time earnings', s => cash(s.allTimeEarnings)],
       ['lifetime', 'This run’s earnings', s => cash(s.lifetime)],
-      ['fastestMove', 'Fastest move-out', s => s.records.fastestMoveSeconds === null ? 'Not recorded' : E.formatDuration(s.records.fastestMoveSeconds)],
+      ['sites', 'Sites this run', s => E.runSites(s).map(id => LOCATIONS[id].name).join(' → ')],
+      ['fastestMove', 'Fastest first move', s => s.records.fastestMoveSeconds === null ? 'Not recorded' : E.formatDuration(s.records.fastestMoveSeconds)],
       ['bestRun', 'Best run earnings', s => cash(s.records.bestRunEarnings)],
       // Prices are whole dollars. Parallel fractional earnings can leave the
       // subtraction a fraction of a cent below the amount actually spent.
@@ -2217,7 +2991,7 @@
       ['fires', 'Fires', s => whole.format(s.counters.fires)],
       ['insurancePaid', 'Insurance paid', s => insuranceMoney(s.counters.insurancePaid)],
       ['bonusCashEarned', 'Bonus cash earned', s => cash(s.counters.bonusCashEarned)],
-      ['timeToMove', 'Time to move-out', s => {
+      ['timeToMove', 'Time to first move', s => {
         if (s.location === 'basement') return 'Not yet';
         return s.counters.moveTimeRecorded
           ? E.formatDuration(s.counters.timeToMove) : 'Not recorded';
@@ -2383,11 +3157,10 @@
     function update(st) {
       const s = state();
       const ids = E.newAchievements(s, st);
-      if (ids.length) {
-        s.achievements.push(...ids);
-        save();
-        notify(ids);
-      }
+      if (ids.length) s.achievements.push(...ids);
+      const decorChanged = decorStudio.sync(s, ids.length > 0);
+      if (ids.length || decorChanged) save();
+      if (ids.length) notify(ids);
       showCount(s.achievements.length);
       if (!dialog.open && window.GameShell?.panel !== 'stats') return;
       const now = performance.now();
@@ -2515,7 +3288,7 @@
       withdraw();
       const reward = E.claimBonus(state);
       const jackpot = reward.tier === 'jackpot';
-      const label = '+' + wholeDollars.format(reward.amount) + (jackpot ? ' JACKPOT!' : ' PRIORITY!');
+      const label = '+' + exactMoney(reward.amount) + (jackpot ? ' JACKPOT!' : ' PRIORITY!');
       feel.priorityReward(p, label, jackpot);
       if (feel.reduced()) {
         receipt.classList.toggle('jackpot', jackpot);
@@ -3129,7 +3902,7 @@
       atlas.width = (bitTiles + colors.length * paperAngles) * tileSize;
       atlas.height = tileSize;
       const g = atlas.getContext('2d');
-      g.font = 'bold 12px Nunito, sans-serif'; g.textAlign = 'center';
+      g.font = 'bold 12px Archivo, sans-serif'; g.textAlign = 'center';
       for (let i = 0; i < bitTiles; i++) {
         g.fillStyle = colors[i % colors.length];
         g.fillText('10$'[i % 3], i * tileSize + tileSize / 2, 12);
@@ -3155,7 +3928,7 @@
       sprite.width = Math.ceil(text.length * size * 0.67) + 4;
       sprite.height = size + 7;
       const g = sprite.getContext('2d');
-      g.font = 'bold ' + size + 'px Nunito, sans-serif'; g.textAlign = 'center'; g.fillStyle = color;
+      g.font = 'bold ' + size + 'px Archivo, sans-serif'; g.textAlign = 'center'; g.fillStyle = color;
       g.fillText(text, sprite.width / 2, size + 1);
       // Tap values recur. Shop prices vary, so bound the retained label images.
       if (labels.size >= 24) labels.delete(labels.keys().next().value);
@@ -3412,7 +4185,7 @@
         { transform: 'translateY(2px)' }, { transform: 'translateY(-1px)' }, { transform: 'translateY(0)' }],
       { duration: 155, easing: 'ease-out' });
     }
-    const machineLabels = { 'Old Laptop': 'LAPTOPS', 'Desktop Tower': 'TOWERS', 'Rack Server': 'RACK SERVERS', 'GPU Rig': 'GPU RIGS', 'AI Training Cluster': 'AI TRAINING CLUSTERS', 'Quantum Mainframe': 'QUANTUM MAINFRAMES' };
+    const machineLabels = { 'Old Laptop': 'LAPTOPS', 'Desktop Tower': 'TOWERS', 'Rack Server': 'RACK SERVERS', 'GPU Rig': 'GPU RIGS', 'AI Training Cluster': 'AI TRAINING CLUSTERS', 'Quantum Mainframe': 'QUANTUM MAINFRAMES', 'Exascale Array': 'EXASCALE ARRAYS' };
     function milestone(card, machineName, multiplier) {
       if (!reduced() && !hidden()) {
         if (milestoneBounds) milestoneBounds.observe(card);
@@ -3423,9 +4196,9 @@
       [523, 659, 784, 1046].forEach((hz, i) => note(hz, 0.15, 0.12, 'triangle', i * 0.062));
       vibrate(26);
     }
-    function move() {
+    function move(message) {
       burst(window.innerWidth * 0.5, window.innerHeight * 0.55, 88, true);
-      showMoment('Move-out unlocked!', true);
+      showMoment(message, true);
       shake();
       [523, 659, 784, 1046, 1319].forEach((hz, i) => note(hz, 0.21, 0.105, 'triangle', i * 0.073));
     }
@@ -3452,6 +4225,10 @@
       saleChime.notes.forEach((hz, i) => note(hz, saleChime.duration, saleChime.gain, 'sine', i * saleChime.spacing));
       vibrate(saleChime.hapticMs);
     }
+    function decorUnlock() {
+      note(587, .10, .055, 'sine'); note(880, .14, .05, 'sine', .09);
+      vibrate(9);
+    }
     function incident() {
       note(466, 0.085, 0.1, 'sine'); note(622, 0.14, 0.095, 'sine', 0.105);
       vibrate(18);
@@ -3472,7 +4249,7 @@
       effectsButton.setAttribute('aria-pressed', String(reducedMotion));
       effectsButton.setAttribute('aria-label', media.matches ? 'Reduced effects follow your device motion setting' : 'Reduced visual effects');
       effectsButton.disabled = media.matches;
-      soundButton.textContent = $('settings-dialog') ? 'Sound & haptics: ' + (sound ? 'On' : 'Off') : (sound ? 'Sound on' : 'Sound off');
+      soundButton.textContent = $('settings-dialog') ? 'Sound and haptics: ' + (sound ? 'On' : 'Off') : (sound ? 'Sound on' : 'Sound off');
       soundButton.setAttribute('aria-label', 'Sound and haptics');
       soundButton.setAttribute('aria-pressed', String(sound));
       if (reducedMotion) {
@@ -3507,7 +4284,9 @@
     if (media.addEventListener) media.addEventListener('change', syncPrefs);
     else media.addListener(syncPrefs);
     clearCanvas(); syncPrefs(); visibility();
-    return { reduced, soundOn: () => sound, updateMoney, tap, spend, purchase, staffReceipt, powerTick, fireAlarm, fireCrash, goalReward, priorityReward, milestone, move, celebrateSale, challengeComplete, beginRun, resetRun, incident, heat, visibility, toggleEffects, toggleSound, syncPrefs };
+    // Repaint the balance on the next update (e.g. after the number style changes).
+    const refreshMoneyText = () => { target = null; };
+    return { reduced, soundOn: () => sound, updateMoney, refreshMoneyText, tap, spend, purchase, staffReceipt, powerTick, fireAlarm, fireCrash, goalReward, priorityReward, milestone, move, showMoment, celebrateSale, challengeComplete, beginRun, resetRun, decorUnlock, incident, heat, visibility, toggleEffects, toggleSound, syncPrefs };
   }
 
   function createNewsAndTips() {
@@ -3548,6 +4327,8 @@
     });
     const tipsOn = preference('tips', 'Tips', enabled => {
       if (!enabled) { hideTip(); queue.clear(); } else update(lastStats, true);
+      nextStepKey = undefined; // Show or hide the Next step line without announcing it.
+      renderNextStep();
     });
 
     function playHeadline() {
@@ -3636,9 +4417,12 @@
     window.addEventListener('resize', positionSoon);
     bubble.addEventListener('click', hideTip);
     const targets = {
+      decor: () => $('decorate-btn'),
       smoke: () => $('fire-risk'),
       perk: () => $('perk-title'), priority: () => $('priority-track'), incident: () => el.incident,
-      heat: () => el.heatText, power: () => el.powerControl, move: () => el.moveBtn, sale: () => el.sellBtn, mall: () => el.roomTitle,
+      heat: () => el.heatText, power: () => el.powerControl, move: () => el.moveBtn, expand: () => el.moveBtn, sale: () => el.sellBtn, mall: () => el.roomTitle,
+      dam: () => $('heat-chip'), volcano: () => $('heat-chip'), orbital: () => $('heat-chip'),
+      bunker: () => el.fireproofBadge, penthouse: () => el.tapMultiplier,
       cluster: () => activeShopTab === 'machine' ? document.querySelector('.card[data-item="cluster"]') : tab('machine'),
       mainframe: () => activeShopTab === 'machine' ? document.querySelector('.card[data-item="mainframe"]') : tab('machine'),
       manager: () => activeShopTab === 'staff' ? $('staff-manager') : tab('staff'),
@@ -3658,6 +4442,12 @@
         syncPlayback();
       }
       if (!tipsOn() || document.hidden) return;
+      const covered = nextStepTip();
+      if (covered) {
+        if (current?.id === covered) hideTip();
+        queue.delete(covered);
+        state.flags['tip:' + covered] = true;
+      }
       const view = { throttled: st?.throttle < 1, powerUnlocked: !el.powerControl.hidden, priority: !$('priority-request').hidden,
         best: !state.flags['tip:best'] && !!targets.best() };
       for (const tip of E.pendingTips(state, view, queue)) queue.set(tip.id, tip);
@@ -3673,7 +4463,7 @@
       for (const [id, tip] of urgent ? [['smoke', queue.get('smoke')]] : queue) {
         if (id === 'smoke' && state.fireRisk < E.FIRE.smokeRisk) { queue.delete(id); continue; }
         if (id === 'perk' && !state.perkChoicePending || id === 'priority' && !view.priority ||
-            id === 'incident' && !state.event || id === 'move' && !E.canMove(state) || id === 'sale' && !E.canSell(state)) {
+            id === 'incident' && !state.event || (id === 'move' || id === 'expand') && !E.canMove(state) || id === 'sale' && !E.canSell(state)) {
           queue.delete(id);
           continue;
         }
@@ -3705,7 +4495,7 @@
       ticker.hidden = !tickerOn();
       if (tickerOn()) rotate();
     }
-    return { initialize, update, syncPlayback, milestone: () => { lastMilestone = performance.now(); },
+    return { initialize, update, syncPlayback, tipsEnabled: tipsOn, milestone: () => { lastMilestone = performance.now(); },
       burn(payout) {
         lastFire = performance.now();
         if (payout > 0) lastPayout = lastFire;
@@ -3724,6 +4514,7 @@
   const feel = createFeel();
   const guidance = createNewsAndTips();
   const priority = createPriorityRequest();
+  const decorStudio = createDecorationStudio();
   const achievementPanel = createAchievementPanel({ state: () => state, feel, log, save });
   const backups = createSaveBackups(window.Backup);
   const settingsPanel = el.settingsDialog ? createSettingsPanel(backups) : null;

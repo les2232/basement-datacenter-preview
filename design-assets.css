@@ -1,7 +1,10 @@
+/* Archivo (SIL OFL 1.1, fonts/Archivo-OFL.txt): one bundled variable family with
+   weight and width axes and tabular figures, so every device renders the same type. */
 @font-face {
-  font-family: Nunito;
-  src: url("./fonts/Nunito-Latin.woff2") format("woff2");
-  font-weight: 400 900;
+  font-family: Archivo;
+  src: url("./fonts/Archivo-Latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
   font-style: normal;
   font-display: swap;
 }

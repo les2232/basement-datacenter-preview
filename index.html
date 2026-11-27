@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Mom, It's a Startup</title>
   <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#211e22">
+  <meta name="theme-color" content="#191c1b">
   <link rel="manifest" data-href="./manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon.png">
   <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png">
@@ -29,9 +29,13 @@
       <div class="heat-chip-wrap">
         <button type="button" id="heat-chip" aria-controls="thermal-panel" aria-expanded="false" aria-label="Heat and power">
           <span class="heat-caption"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-heat"></use></svg> Heat <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-chevron"></use></svg></span><strong id="heat-percent">0%</strong><span class="bar"><span class="bar-fill" id="heat-fill"></span></span>
+          <span id="fireproof-badge" class="signature-chip" hidden>Fireproof</span>
         </button>
         <div id="thermal-panel" hidden>
-          <h2>Heat &amp; power</h2><span id="heat-text"></span>          <div id="fire-risk" hidden>
+          <h2>Heat and power</h2>
+          <span id="heat-text"></span>
+          <span id="orbital-heat-rule" hidden></span>
+          <div id="fire-risk" hidden>
             <div class="meter-label"><span>Fire risk</span><span id="fire-risk-value"></span></div>
             <div class="bar" aria-hidden="true"><div class="bar-fill" id="fire-risk-fill"></div></div>
           </div>
@@ -49,14 +53,15 @@
             <div class="power-rail" aria-hidden="true">
               <span id="power-best"><span>best</span></span>
             </div>
-            <input id="power-slider" type="range" aria-describedby="power-readout power-target">
+            <input id="power-slider" type="range" aria-describedby="power-readout power-target power-cap-label">
           </div>
           <span id="power-target" class="news-sr"></span>
+          <span id="power-cap-label" hidden></span>
         </div>
           <button type="button" class="btn" id="heat-close">Done</button>
         </div>
       </div>
-      <div class="hud-job">        <button type="button" class="job-btn" id="job-btn" aria-describedby="tap-equivalent">
+      <div class="hud-job">        <button type="button" class="job-btn" id="job-btn" aria-describedby="tap-equivalent" aria-keyshortcuts="Space">
           <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-tap"></use></svg><span class="job-title">Run a job</span>
           <span class="job-value" id="job-value">+$1</span>
           <span id="tap-receipt" aria-hidden="true"></span>
@@ -80,6 +85,16 @@
         <button type="button" id="sell-btn" class="btn" aria-describedby="goal-title" hidden>Sell startup</button>
         <button type="button" id="board-btn" class="btn" hidden>Board Room</button>
       </div>
+      <div class="next-step" id="next-step" hidden>
+        <p><span class="next-step-label">Next step</span> <span id="next-step-text"></span></p>
+        <button type="button" id="next-step-action" aria-describedby="next-step-text" hidden></button>
+      </div>
+      <span class="news-sr" id="next-step-announcement" role="status" aria-atomic="true"></span>
+      <div class="next-step contract-line" id="contract-line" hidden>
+        <p><span class="next-step-label">Contract</span> <span id="contract-line-text"></span></p>
+        <button type="button" id="contract-line-action" aria-describedby="contract-line-text">View</button>
+      </div>
+      <span class="news-sr" id="contract-announcement" role="status" aria-atomic="true"></span>
     </section>
 
     <div class="game-board">
@@ -88,6 +103,8 @@
           <div class="location-copy"><span class="room-kicker" id="run-number">Run 01</span>
             <h2 id="room-title">The Basement</h2><p id="room-terms" hidden></p></div>
           <div class="location-actions"><span id="reputation" hidden></span>
+            <button type="button" class="decor-toggle" id="decorate-btn" aria-expanded="false" aria-controls="decor-workbench"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-brush"></use></svg><span>Decorate</span><i id="decor-dot" class="nav-dot" aria-label="New decorations" hidden></i></button>
+            <button type="button" class="decor-action" id="decor-done" hidden><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-check"></use></svg>Done</button>
             <button type="button" id="location-map" aria-label="Open the location map" aria-haspopup="dialog" aria-controls="modal"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-map"></use></svg><span>Map</span><span id="location" class="news-sr">Parents' Basement</span></button>
           </div>
         </header>
@@ -98,6 +115,7 @@
         </div>
   <button type="button" id="first-tip" hidden><span id="first-tip-text"></span><span aria-hidden="true"> ×</span></button>
   <span class="news-sr" id="tip-announcement" role="status" aria-atomic="true"></span>
+  <div id="decor-toast" role="status" aria-atomic="true" hidden><span id="decor-toast-icon" aria-hidden="true"></span><span id="decor-toast-text"></span></div>
   <div id="achievement-toast" role="status" aria-atomic="true">
     <span id="achievement-toast-icon" aria-hidden="true"></span>
     <span id="achievement-toast-text"></span>
@@ -125,7 +143,8 @@
           <span id="priority-receipt" role="status"></span>
         </div>
 
-        <div class="room-foot"><span><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-tap"></use></svg> Tap the room to run a job</span><span id="tap-equivalent" hidden></span></div>
+        <div class="room-foot"><span><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-tap"></use></svg> Tap the room to run a job</span><span id="tap-multiplier" class="signature-chip" hidden>2× taps</span><span id="tap-equivalent" hidden></span></div>
+        <div id="decor-tools" hidden><span><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-brush"></use></svg><span id="decor-room-help">Tap a spot to decorate</span></span><button type="button" class="decor-action" id="decor-snapshot"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-camera"></use></svg> Snapshot</button></div>
         <p id="fire-rebuild" hidden></p>
           <section id="incident-banner" class="incident" aria-labelledby="incident-title" hidden>
     <div class="incident-heading">
@@ -142,6 +161,15 @@
 
 
       </section>
+      <aside id="decor-workbench" aria-labelledby="decor-heading" hidden>
+        <header class="decor-heading"><div><span id="decor-category">Decorate</span><h2 id="decor-heading" tabindex="-1">Choose a spot</h2></div>
+          <button type="button" id="decor-picker-close" class="decor-action" aria-label="Choose another spot" hidden><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-close"></use></svg></button></header>
+        <nav id="decor-slots" aria-label="Decoration slots"></nav>
+        <div id="decor-picker" hidden><div id="decor-items"></div>
+          <div class="decor-commit"><button type="button" class="btn" id="decor-default">Default</button><button type="button" class="btn primary" id="decor-use">Use</button></div>
+        </div>
+        <span class="news-sr" role="status" id="decor-status"></span>
+      </aside>
       <button type="button" id="sheet-scrim" aria-label="Close panel" tabindex="-1" hidden></button>
       <aside id="game-sheet" aria-labelledby="sheet-title" data-sheet="shop" data-size="half">
         <header class="sheet-head">
@@ -187,7 +215,26 @@
       </div>
 </section>
           <section id="sheet-staff" hidden><p id="staff-lock" class="empty-state">Staff will appear as your startup grows.</p></section>
-          <section id="sheet-goals" hidden><button type="button" id="goals-toggle" aria-expanded="false" aria-controls="goals-panel" hidden>Today's to-do list <span class="claim-dot" hidden></span></button>
+          <section id="sheet-goals" hidden>
+            <section id="contracts-panel" aria-labelledby="contracts-heading">
+              <div class="contracts-heading"><h3 id="contracts-heading" tabindex="-1">Client contracts</h3><span id="contracts-dot" class="claim-dot" hidden></span></div>
+              <p id="contracts-lock" class="empty-state"></p>
+              <p id="contracts-intro">One client at a time. Progress pauses instead of failing, and keeps counting while you're away.</p>
+              <article id="contract-active" class="contract-card" tabindex="-1" aria-labelledby="contract-active-name" hidden>
+                <div class="contract-top"><span class="contract-icon" id="contract-active-icon" aria-hidden="true"></span>
+                  <div class="contract-names"><strong id="contract-active-name"></strong><span class="contract-client" id="contract-active-client"></span></div>
+                  <span class="contract-reward" id="contract-active-reward"></span></div>
+                <p class="contract-terms" id="contract-active-terms"></p>
+                <div class="contract-track" id="contract-track" role="progressbar" aria-labelledby="contract-active-name" aria-describedby="contract-active-status" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="contract-fill" id="contract-fill"></div></div>
+                <p class="contract-status" id="contract-active-status"></p>
+                <p class="contract-tradeoff" id="contract-active-tradeoff"></p>
+                <button type="button" class="btn contract-end" id="contract-end">End contract</button>
+              </article>
+              <ul id="contract-offers" aria-label="Contract offers"></ul>
+              <p id="contracts-locked"></p>
+              <span id="contracts-receipt" role="status" aria-atomic="true"></span>
+            </section>
+            <button type="button" id="goals-toggle" aria-expanded="false" aria-controls="goals-panel" hidden>Today's to-do list <span class="claim-dot" hidden></span></button>
             <p id="goals-lock" class="empty-state">Buy your first laptop to get your first to-do list.</p>        <section id="goals-panel" aria-labelledby="goals-heading" hidden>
           <div class="goals-heading">
             <h3 id="goals-heading">Today's to-do list</h3>
@@ -223,6 +270,12 @@
     <span class="news-sr" id="news-help">News ticker. Activate to pause for ten seconds.</span>
 
   </main>
+  <dialog id="decor-photo" class="modal" aria-labelledby="decor-photo-title">
+    <header class="decor-heading"><h2 id="decor-photo-title">Room snapshot</h2><button type="button" class="decor-action" id="decor-photo-close" aria-label="Close snapshot"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#icon-close"></use></svg></button></header>
+    <img id="decor-photo-preview" alt="Snapshot of your room" hidden>
+    <p id="decor-photo-status" role="status"></p>
+    <div class="decor-photo-actions"><button type="button" class="btn" id="decor-share" hidden>Share</button><button type="button" class="btn primary" id="decor-download" hidden>Download PNG</button></div>
+  </dialog>
   <dialog id="settings-dialog" class="modal" aria-labelledby="settings-title">
     <header class="settings-heading">
       <h2 id="settings-title">Settings</h2>
@@ -230,13 +283,18 @@
     </header>
     <div class="settings-sections">
       <section aria-labelledby="settings-display">
-        <h3 id="settings-display">Display &amp; sound</h3>
+        <h3 id="settings-display">Display and sound</h3>
         <div class="settings-toggles">
-          <button type="button" class="btn" id="sound-toggle">Sound &amp; haptics</button>
+          <button type="button" class="btn" id="sound-toggle">Sound and haptics</button>
           <button type="button" class="btn" id="effects-toggle">Effects: Full</button>
           <button type="button" class="btn" id="ticker-toggle" aria-pressed="true">Ticker on</button>
           <button type="button" class="btn" id="tips-toggle" aria-pressed="true">Tips on</button>
+          <button type="button" class="btn" id="notation-toggle">Numbers: Standard</button>
         </div>
+      </section>
+      <section aria-labelledby="settings-keys" class="settings-keys">
+        <h3 id="settings-keys">Keyboard shortcuts</h3>
+        <p><kbd>Space</kbd> run a job · <kbd>1</kbd>–<kbd>4</kbd> buy ×1, ×10, ×100, Max · <kbd>M</kbd> <kbd>C</kbd> <kbd>U</kbd> <kbd>H</kbd> Machines, Cooling, Upgrades, Hires</p>
       </section>
       <section id="reward-settings" aria-labelledby="reward-settings-title" hidden>
         <h3 id="reward-settings-title">Optional rewards</h3>
@@ -363,6 +421,7 @@
   <script src="preview.js"></script>
   <script src="icons-ui.js"></script>
   <script src="room-scene.js"></script>
+  <script src="room-snapshot.js"></script>
   <script src="shell.js"></script>
   <script src="game.js"></script>
 </body>

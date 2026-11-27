@@ -14,6 +14,19 @@
   let opened = false;
   let lastShop = 'machine';
   let pointer = null;
+  let switching = false;
+  // Each panel (and each shop category) keeps its own scroll position, so
+  // comparing a machine with a hire never sends the player back to the top.
+  const positions = new Map();
+  function scrollKey() {
+    if (selected !== 'shop') return selected;
+    const current = document.querySelector('#shop-tabs [aria-selected="true"]');
+    return current ? current.id : 'shop';
+  }
+  function remember() {
+    if (opened || wide.matches) positions.set(scrollKey(), scroll.scrollTop);
+  }
+  function restore() { scroll.scrollTop = positions.get(scrollKey()) || 0; }
 
   function setSize(size) {
     sheet.dataset.size = size;
@@ -37,25 +50,28 @@
     if (!wide.matches && opened && name === selected && toggle) { close(); return; }
     const current = document.querySelector('#shop-tabs [aria-selected="true"]');
     if (current && current.id !== 'shop-tab-staff') lastShop = current.id.slice(9);
-    const switched = name !== selected;
+    remember();
     selected = name;
-    if (!opened || switched) { setSize('half'); scroll.scrollTop = 0; }
     opened = true;
     id('thermal-panel').hidden = true;
     id('heat-chip').setAttribute('aria-expanded','false');
     paintPanels();
-    if (name === 'staff') {
-      if (!id('shop-tab-staff').hidden) id('shop-tab-staff').click();
-    } else if (name === 'shop') {
-      const tab = id('shop-tab-' + lastShop);
-      if (tab && !tab.hidden) tab.click(); else id('shop-tab-machine').click();
-    }
+    switching = true;
+    try {
+      if (name === 'staff') {
+        if (!id('shop-tab-staff').hidden) id('shop-tab-staff').click();
+      } else if (name === 'shop') {
+        const tab = id('shop-tab-' + lastShop);
+        if (tab && !tab.hidden) tab.click(); else id('shop-tab-machine').click();
+      }
+    } finally { switching = false; }
+    restore();
     if (!wide.matches && !toggle) closeButton.focus({preventScroll:true});
   }
   function close() {
     if (wide.matches || !opened) return;
+    remember();
     opened = false;
-    setSize('half');
     paintPanels();
     tabs.find(tab=>tab.dataset.openSheet === selected)?.focus({preventScroll:true});
   }
@@ -124,6 +140,20 @@
     const staffPanel = id('shop-panel-staff'), staffTab = id('shop-tab-staff');
     staffPanel.removeAttribute('role'); staffPanel.removeAttribute('aria-labelledby'); staffPanel.removeAttribute('tabindex');
     id('sheet-staff').append(staffPanel);
+    // Keep the category and quantity controls pinned while the purchase list scrolls.
+    const shopControls = document.createElement('div');
+    shopControls.className = 'shop-controls';
+    shopControls.append(id('shop-tabs'), id('shop-quantity'));
+    id('sheet-shop').querySelector('.shop').prepend(shopControls);
+    if (typeof ResizeObserver === 'function') {
+      new ResizeObserver(() => sheet.style.setProperty('--shop-controls-height', shopControls.offsetHeight + 'px')).observe(shopControls);
+    }
+    // Switching shop categories also returns to where that category was left.
+    const shopTabList = id('shop-tabs');
+    shopTabList.addEventListener('click', () => { if (!switching) remember(); }, true);
+    shopTabList.addEventListener('click', () => { if (!switching) restore(); });
+    shopTabList.addEventListener('keydown', () => { if (!switching) remember(); }, true);
+    shopTabList.addEventListener('keydown', () => { if (!switching) restore(); });
     function updateStaff() {
       id('staff-lock').hidden = !staffTab.hidden;
       if (selected === 'staff' && (opened || wide.matches) && !staffTab.hidden && staffTab.getAttribute('aria-selected') !== 'true') staffTab.click();
@@ -134,14 +164,15 @@
     const staffDot = staffTab.querySelector('.shop-tab-dot');
     const shopDots = [...id('shop-tabs').querySelectorAll('.shop-tab-dot')].filter(dot=>dot !== staffDot);
     const goalDot = id('goals-toggle').querySelector('.claim-dot');
+    const contractDot = id('contracts-dot');
     const laptop = document.querySelector('.card[data-item="laptop"]');
     const signal = () => {
       navDot('staff').hidden = staffDot.hidden;
       navDot('shop').hidden = !(shopDots.some(dot=>!dot.hidden) || (laptop && !laptop.disabled));
-      navDot('goals').hidden = goalDot.hidden || id('goals-toggle').hidden;
+      navDot('goals').hidden = (goalDot.hidden || id('goals-toggle').hidden) && contractDot.hidden;
     };
     const observer = new MutationObserver(signal);
-    for (const node of [...shopDots,staffDot,goalDot,laptop]) if (node) observer.observe(node,{attributes:true,attributeFilter:['hidden','disabled']});
+    for (const node of [...shopDots,staffDot,goalDot,contractDot,laptop]) if (node) observer.observe(node,{attributes:true,attributeFilter:['hidden','disabled']});
     signal();
     paintPanels();
     if (wide.matches && staffTab.getAttribute('aria-selected')==='true') select('shop');
